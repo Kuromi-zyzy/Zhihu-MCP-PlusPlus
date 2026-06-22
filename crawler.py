@@ -1,0 +1,297 @@
+import requests
+from bs4 import BeautifulSoup
+import re
+import time
+import json
+
+# ========== API 端点 (requests 方式, 会被知乎反爬拦截) ==========
+
+def answers_api(question_id, limit=20, offset=0, sort_by="default"):
+    return (
+        f"https://www.zhihu.com/api/v4/questions/{question_id}/answers?"
+        f"include=data[*].voteup_count,content&limit={limit}&offset={offset}&sort_by={sort_by}"
+    )
+
+def answer_api(answer_id):
+    return f"https://www.zhihu.com/api/v4/answers/{answer_id}?include=data[*].voteup_count,content"
+
+def article_api(article_id):
+    return f"https://api.zhihu.com/articles/{article_id}"
+
+def question_info_api(question_id):
+    return f"https://www.zhihu.com/api/v4/questions/{question_id}?include=title"
+
+# ========== requests 方式（备用，可能被 403） ==========
+
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://www.zhihu.com/",
+    "Origin": "https://www.zhihu.com",
+}
+
+class ZhihuCrawler:
+    def __init__(self, cookie="", proxies=None, timeout=15, retries=3):
+        self.session = requests.Session()
+        self.session.headers.update(DEFAULT_HEADERS)
+        if cookie:
+            self.session.headers["Cookie"] = cookie
+        if proxies:
+            self.session.proxies.update(proxies)
+        self.timeout = timeout
+        self.retries = retries
+
+    def _request(self, url):
+        for i in range(self.retries):
+            try:
+                resp = self.session.get(url, timeout=self.timeout)
+                if resp.status_code == 200:
+                    return resp
+                elif resp.status_code == 403:
+                    return None
+                else:
+                    print(f"[!] HTTP {resp.status_code}")
+            except requests.exceptions.Timeout:
+                pass
+            except requests.exceptions.ConnectionError:
+                pass
+            time.sleep(2 * (i + 1))
+        return None
+
+    def get_answers(self, question_id, sort_by="default", max_pages=None):
+        offset = 0
+        page = 0
+        all_answers = []
+        while True:
+            url = answers_api(question_id, offset=offset, sort_by=sort_by)
+            resp = self._request(url)
+            if resp is None:
+                break
+            try:
+                data = resp.json()
+            except json.JSONDecodeError:
+                break
+            items = data.get("data", [])
+            if not items:
+                break
+            all_answers.extend(items)
+            offset += len(items)
+            page += 1
+            print(f"  → 已获取 {len(all_answers)} 条回答")
+            if max_pages and page >= max_pages:
+                break
+            paging = data.get("paging", {})
+            if not paging.get("is_end", True):
+                time.sleep(3)
+            else:
+                break
+        return all_answers
+
+    def get_answer(self, answer_id):
+        url = answer_api(answer_id)
+        resp = self._request(url)
+        if resp is None:
+            return None
+        try:
+            return resp.json()
+        except json.JSONDecodeError:
+            return None
+
+    def get_article(self, article_id):
+        url = article_api(article_id)
+        resp = self._request(url)
+        if resp is None:
+            return None
+        try:
+            return resp.json()
+        except json.JSONDecodeError:
+            return None
+
+    def get_question_title(self, question_id):
+        url = question_info_api(question_id)
+        resp = self._request(url)
+        if resp is None:
+            return None
+        try:
+            return resp.json().get("title", "")
+        except json.JSONDecodeError:
+            return None
+
+
+# ========== DrissionPage 浏览器方式（推荐，不会被拦截） ==========
+
+class BrowserCrawler:
+    """基于 DrissionPage 的浏览器爬虫，绕过知乎反爬"""
+
+    def __init__(self, headless=False):
+        self.headless = headless
+        self._page = None
+
+    def _get_page(self):
+        if self._page is None:
+            from DrissionPage import ChromiumPage
+            self._page = ChromiumPage()
+        return self._page
+
+    def close(self):
+        if self._page:
+            try:
+                self._page.quit()
+            except Exception:
+                pass
+            self._page = None
+
+    def get_question_title(self, question_id):
+        page = self._get_page()
+        url = f"https://www.zhihu.com/question/{question_id}"
+        print(f"  → 正在打开问题页面...")
+        page.get(url)
+        time.sleep(4)
+        try:
+            title_el = page.ele("tag:h1", timeout=10)
+            return title_el.text if title_el else None
+        except Exception:
+            return None
+
+    def get_answers(self, question_id, max_answers=None):
+        page = self._get_page()
+        url = f"https://www.zhihu.com/question/{question_id}"
+        answers = []
+
+        print(f"  → 正在打开问题页面...")
+        page.get(url)
+        time.sleep(5)
+
+        # 检测页面是否有效（是否有 404）
+        current_url = page.url
+        if "question/not-found" in current_url or "404" in current_url:
+            print("  [!] 问题不存在 (404)")
+            return answers
+
+        # 获取标题
+        question_title = ""
+        try:
+            title_el = page.ele("tag:h1", timeout=5)
+            question_title = title_el.text if title_el else ""
+            if question_title:
+                print(f"  ✓ 标题: {question_title}")
+        except Exception:
+            pass
+
+        # 滚动到底部多次，触发懒加载
+        print("  → 正在滚动加载更多回答...")
+        last_height = page.run_js("return document.body.scrollHeight")
+        stable_scrolls = 0
+
+        for scroll_round in range(30):
+            page.run_js("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(2)
+
+            new_height = page.run_js("return document.body.scrollHeight")
+            if new_height == last_height:
+                stable_scrolls += 1
+                if stable_scrolls >= 3:
+                    break
+            else:
+                stable_scrolls = 0
+                last_height = new_height
+
+            if scroll_round % 3 == 0:
+                print(f"  → 滚动中... ({scroll_round + 1}/30)")
+
+        time.sleep(2)
+
+        # 提取所有回答卡片
+        try:
+            # 多种选择器兜底
+            items = page.eles("t:div@class=List-item")
+            if not items:
+                items = page.eles("t:div@class=ContentItem")
+            if not items:
+                items = page.eles("t:div@class=AnswerCard")
+            if not items:
+                items = page.eles("t:div@class=Card")
+
+            print(f"  → 检测到 {len(items)} 个内容元素")
+
+            for i, item in enumerate(items):
+                try:
+                    answer_data = self._extract_answer(item, question_id, question_title)
+                    if answer_data and answer_data.get("content", "").strip():
+                        answers.append(answer_data)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            print(f"  [!] 提取失败: {e}")
+
+        return answers
+
+    def _extract_answer(self, card_el, question_id, question_title):
+        """从浏览器元素提取回答数据"""
+        html = ""
+        if hasattr(card_el, 'html'):
+            try:
+                html = card_el.html
+            except Exception:
+                pass
+        if not html:
+            html = str(card_el)
+        soup = BeautifulSoup(html, "html.parser")
+
+        # 提取点赞数
+        voteup = "0"
+        vote_el = soup.find("button", class_=re.compile(r"VoteButton"))
+        if vote_el:
+            voteup = vote_el.get_text(strip=True)
+        if not voteup or voteup == "△":
+            voteup = "0"
+
+        # 提取作者
+        author = ""
+        author_link = soup.find("a", class_=re.compile(r"UserLink-link"))
+        if author_link:
+            author = author_link.get_text(strip=True)
+        if not author:
+            meta_name = soup.find("meta", itemprop="name")
+            if meta_name:
+                author = meta_name.get("content", "")
+        if not author:
+            author = "匿名用户"
+
+        # 提取作者主页
+        author_url = ""
+        if author_link:
+            author_url = author_link.get("href", "")
+            if author_url and not author_url.startswith("http"):
+                author_url = "https://www.zhihu.com" + author_url
+
+        # 提取回答内容（HTML）
+        content_html = ""
+        content_div = soup.find("div", class_=re.compile(r"RichContent-inner"))
+        if not content_div:
+            content_div = soup.find("span", class_=re.compile(r"RichText"))
+        if not content_div:
+            content_div = soup.find("div", class_=re.compile(r"ContentItem"))
+        if content_div:
+            content_html = str(content_div)
+
+        # 提取回答 ID
+        answer_id = ""
+        if hasattr(card_el, 'attr'):
+            try:
+                answer_id = card_el.attr('data-za-detail-entity-id') or ""
+            except Exception:
+                pass
+
+        return {
+            "id": answer_id,
+            "author": author,
+            "author_url": author_url,
+            "voteup": voteup,
+            "content": content_html,
+            "question_id": question_id,
+            "question_title": question_title,
+        }

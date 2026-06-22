@@ -1,22 +1,85 @@
 # ZhihuSpider
-知乎爬虫，用于爬取知乎上的内容，并且将爬取的内容解析为markdown保存到本地硬盘。
 
-## 支持的内容
-目前支持的内容包括：
-- 特定问题下的所有(优质)回答
-- 特定用户的所有回答、文章
-- 专栏
-- 话题精华
-- 收藏夹
-- 单个回答
-- 单篇文章
+知乎内容爬虫，通过知乎 API 爬取问题下的回答、单篇回答或专栏文章，并保存为 Markdown 文件。
 
-## 爬虫工作方式
-利用知乎api获得相应的内容，其中回答、文章的的主体内容是以html标签的形式包含在api返回的内容中。提取主体内容，将这部分内容解析转换成markdown文件保存到本地
+## 功能
 
-## 启动方式
-GrandConcourse.py是脚本的启动入口。以知乎的问题“[你见过哪些惊艳的句子？](https://www.zhihu.com/question/320078376)”为例。该问题的链接为：https://www.zhihu.com/question/320078376 ，末尾的“320078376”就是该问题唯一的id，将其粘贴到GrandConcourse.py下的“question_id”下即可启动爬取该问题下的优质答案，即`question_id = '320078376'`。
+- 爬取某个问题下的所有（或按点赞/时间排序的）回答
+- 爬取单篇回答
+- 爬取单篇专栏文章
+- **自动 Cookie 捕获**（DrissionPage 控制浏览器登录，自动抓取）
+- 支持手动 Cookie（环境变量 / .env / 命令行参数）
+- 支持代理
+- 自动将 HTML 内容转换为 Markdown 格式
+- 保存元数据（标题、作者、点赞数、链接等）
 
-## 写在最后
+## 安装
 
-私自大量爬取知乎的数据终究不好，请酌情使用，自行承担后果。野生程序员的第一个项目，有很多不足，有兴趣可以交流。QQ：1573687170
+```bash
+cd D:\Tools\ZhihuSpider
+pip install -r requirements.txt
+```
+
+## 快速开始
+
+### 第一步：登录并获取 Cookie
+
+```bash
+python login.py
+```
+
+会自动打开浏览器 → 跳转到知乎登录页 → 扫码/账号登录 → 自动捕获 Cookie 保存到本地。
+
+### 第二步：爬取内容
+
+```bash
+# 爬取问题下的回答
+python main.py question <问题ID>
+
+# 爬取单篇回答
+python main.py answer <回答ID>
+
+# 爬取专栏文章
+python main.py article <文章ID>
+```
+
+### 示例
+
+```bash
+python main.py question 320078376
+python main.py question 320078376 --sort voteups      # 按点赞数排序
+python main.py question 320078376 --proxy "http://127.0.0.1:7890"
+```
+
+## 进阶用法
+
+### Cookie 优先级
+
+1. `--cookie` 命令行参数（最高）
+2. `config.json`（由 `login.py` 自动生成）
+3. `.env` 文件
+4. `ZHIHU_COOKIE` 环境变量
+
+### 手动配置 Cookie
+
+方式一：`.env` 文件
+```bash
+copy .env.example .env
+# 编辑 .env 填入 Cookie
+```
+
+方式二：环境变量
+```bash
+set ZHIHU_COOKIE=你的cookie值
+python main.py question 320078376
+```
+
+## 注意事项
+
+- 请控制请求频率（默认 3 秒间隔）
+- 需要 Cookie 才能正常获取内容
+- 仅用于个人学习和研究，请遵守相关法律法规
+
+## 致谢
+
+参考自 [Foxgeek36/ZhihuSpider](https://github.com/Foxgeek36/ZhihuSpider)

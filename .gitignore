@@ -1,0 +1,17 @@
+# 环境变量（包含敏感 Cookie）
+.env
+
+# 登录 Cookie（login.py 生成，含敏感会话令牌）
+config.json
+
+# 爬取输出
+output/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/
