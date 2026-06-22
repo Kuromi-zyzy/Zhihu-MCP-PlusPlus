@@ -3,6 +3,9 @@ from bs4 import BeautifulSoup
 import re
 import time
 import json
+import random
+import sys
+import traceback
 
 # ========== API 端点 (requests 方式, 会被知乎反爬拦截) ==========
 
@@ -23,11 +26,13 @@ def question_info_api(question_id):
 
 # ========== requests 方式（备用，可能被 403） ==========
 
-DEFAULT_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-    ),
+UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+]
+
+BASE_HEADERS = {
     "Referer": "https://www.zhihu.com/",
     "Origin": "https://www.zhihu.com",
 }
@@ -35,7 +40,8 @@ DEFAULT_HEADERS = {
 class ZhihuCrawler:
     def __init__(self, cookie="", proxies=None, timeout=15, retries=3):
         self.session = requests.Session()
-        self.session.headers.update(DEFAULT_HEADERS)
+        self.session.headers.update(BASE_HEADERS)
+        self.session.headers["User-Agent"] = random.choice(UA_POOL)
         if cookie:
             self.session.headers["Cookie"] = cookie
         if proxies:
@@ -49,15 +55,13 @@ class ZhihuCrawler:
                 resp = self.session.get(url, timeout=self.timeout)
                 if resp.status_code == 200:
                     return resp
-                elif resp.status_code == 403:
+                if resp.status_code == 403:
                     return None
-                else:
-                    print(f"[!] HTTP {resp.status_code}")
-            except requests.exceptions.Timeout:
-                pass
-            except requests.exceptions.ConnectionError:
-                pass
-            time.sleep(2 * (i + 1))
+                print(f"[!] HTTP {resp.status_code}")
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                print(f"[!] 请求异常 ({type(e).__name__}): {e}")
+            if i < self.retries - 1:
+                time.sleep(2 * (i + 1))
         return None
 
     def get_answers(self, question_id, sort_by="default", max_pages=None):
@@ -122,18 +126,58 @@ class ZhihuCrawler:
 
 # ========== DrissionPage 浏览器方式（推荐，不会被拦截） ==========
 
+# 浏览器 profile 持久化路径（复用登录态，避免每次裸启动）
+import os as _os
+_BROWSER_PROFILE = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "web_search.py_profile")
+
 class BrowserCrawler:
     """基于 DrissionPage 的浏览器爬虫，绕过知乎反爬"""
 
-    def __init__(self, headless=False):
+    def __init__(self, headless=False, cookie=""):
         self.headless = headless
+        self.cookie = cookie
         self._page = None
 
     def _get_page(self):
         if self._page is None:
-            from DrissionPage import ChromiumPage
-            self._page = ChromiumPage()
+            from DrissionPage import ChromiumPage, ChromiumOptions
+            co = ChromiumOptions()
+            if _os.path.exists(_BROWSER_PROFILE):
+                co.set_user_data_path(_BROWSER_PROFILE)
+            co.set_argument("--disable-blink-features=AutomationControlled")
+            if self.headless:
+                co.headless()
+            try:
+                self._page = ChromiumPage(co)
+            except Exception as e:
+                print(f"  [!] 持久 profile 启动失败，改用临时 profile: {type(e).__name__}", file=sys.stderr)
+                co_tmp = ChromiumOptions()
+                co_tmp.set_argument("--disable-blink-features=AutomationControlled")
+                if self.headless:
+                    co_tmp.headless()
+                self._page = ChromiumPage(co_tmp)
+            if self.cookie:
+                self._inject_cookie(self.cookie)
         return self._page
+
+    def _inject_cookie(self, cookie_str):
+        """将 cookie 字符串注入浏览器，复用 requests 捕获的登录态"""
+        if not cookie_str:
+            return
+        for pair in cookie_str.split(";"):
+            pair = pair.strip()
+            if "=" not in pair:
+                continue
+            name, value = pair.split("=", 1)
+            try:
+                self._page.set.cookies({
+                    "name": name.strip(),
+                    "value": value.strip(),
+                    "domain": ".zhihu.com",
+                    "path": "/",
+                })
+            except Exception as e:
+                print(f"  [!] cookie 注入失败 ({name}): {e}")
 
     def close(self):
         if self._page:
@@ -152,7 +196,8 @@ class BrowserCrawler:
         try:
             title_el = page.ele("tag:h1", timeout=10)
             return title_el.text if title_el else None
-        except Exception:
+        except Exception as e:
+            print(f"  [!] 获取标题失败: {type(e).__name__}: {e}", file=sys.stderr)
             return None
 
     def get_answers(self, question_id, max_answers=None):
@@ -177,8 +222,8 @@ class BrowserCrawler:
             question_title = title_el.text if title_el else ""
             if question_title:
                 print(f"  ✓ 标题: {question_title}")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  [!] 获取标题失败: {type(e).__name__}: {e}", file=sys.stderr)
 
         # 滚动到底部多次，触发懒加载
         print("  → 正在滚动加载更多回答...")
@@ -192,7 +237,7 @@ class BrowserCrawler:
             new_height = page.run_js("return document.body.scrollHeight")
             if new_height == last_height:
                 stable_scrolls += 1
-                if stable_scrolls >= 3:
+                if stable_scrolls >= 2:
                     break
             else:
                 stable_scrolls = 0
@@ -216,16 +261,22 @@ class BrowserCrawler:
 
             print(f"  → 检测到 {len(items)} 个内容元素")
 
+            fail_count = 0
             for i, item in enumerate(items):
                 try:
                     answer_data = self._extract_answer(item, question_id, question_title)
                     if answer_data and answer_data.get("content", "").strip():
                         answers.append(answer_data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    fail_count += 1
+                    if fail_count <= 3:
+                        print(f"  [!] 第 {i+1} 条提取失败: {type(e).__name__}: {e}", file=sys.stderr)
+            if fail_count > 3:
+                print(f"  [!] 另有 {fail_count - 3} 条提取失败（省略）", file=sys.stderr)
 
         except Exception as e:
-            print(f"  [!] 提取失败: {e}")
+            print(f"  [!] 提取失败: {type(e).__name__}: {e}", file=sys.stderr)
+            traceback.print_exc()
 
         return answers
 
@@ -295,3 +346,89 @@ class BrowserCrawler:
             "question_id": question_id,
             "question_title": question_title,
         }
+
+    def get_article(self, article_id):
+        """浏览器模式获取文章"""
+        page = self._get_page()
+        url = f"https://zhuanlan.zhihu.com/p/{article_id}"
+        print(f"  → 正在打开文章页面...")
+        page.get(url)
+        time.sleep(5)
+
+        current_url = page.url
+        if "404" in current_url or "not-found" in current_url:
+            print("  [!] 文章不存在 (404)")
+            return None
+
+        try:
+            title_el = page.ele("tag:h1", timeout=10)
+            title = title_el.text if title_el else ""
+            content_html = ""
+            for selector in ["t:div@class=Post-RichText", "t:div@class=RichText", "t:article", "tag:div@class^=RichText"]:
+                try:
+                    content_el = page.ele(selector, timeout=3)
+                    if content_el:
+                        content_html = content_el.html
+                        if content_html and len(content_html) > 100:
+                            break
+                except Exception:
+                    continue
+            author = ""
+            try:
+                author_el = page.ele("t:div@class=AuthorInfo", timeout=3)
+                if author_el:
+                    name_el = author_el.ele("tag:meta[itemprop=name]", timeout=2)
+                    if name_el:
+                        author = name_el.attr("content") or ""
+            except Exception:
+                pass
+
+            return {
+                "id": article_id,
+                "title": title,
+                "author": author,
+                "author_url": "",
+                "voteup": 0,
+                "content": content_html,
+            }
+        except Exception as e:
+            print(f"  [!] 文章提取失败: {type(e).__name__}: {e}", file=sys.stderr)
+            return None
+
+    def get_answer(self, answer_id):
+        """浏览器模式获取单个回答"""
+        page = self._get_page()
+        url = f"https://www.zhihu.com/answer/{answer_id}"
+        print(f"  → 正在打开回答页面...")
+        page.get(url)
+        time.sleep(4)
+
+        try:
+            content_el = page.ele("t:div@class=RichContent-inner", timeout=10)
+            if not content_el:
+                content_el = page.ele("t:div@class=RichText", timeout=5)
+            content_html = content_el.html if content_el else ""
+            title = ""
+            title_el = page.ele("tag:h1", timeout=5)
+            if title_el:
+                title = title_el.text
+            author = "匿名用户"
+            author_el = page.ele("t:a@class=UserLink-link", timeout=3)
+            if author_el:
+                author = author_el.text or author
+            voteup = "0"
+            vote_el = page.ele("t:button@class=VoteButton", timeout=3)
+            if vote_el:
+                voteup = vote_el.text or "0"
+
+            return {
+                "id": answer_id,
+                "title": title,
+                "author": author,
+                "content": content_html,
+                "voteup": voteup,
+                "question_title": title,
+            }
+        except Exception as e:
+            print(f"  [!] 回答提取失败: {type(e).__name__}: {e}", file=sys.stderr)
+            return None

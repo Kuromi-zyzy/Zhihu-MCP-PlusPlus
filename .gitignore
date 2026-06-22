@@ -15,3 +15,12 @@ __pycache__/
 # IDE
 .idea/
 .vscode/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+.vscode/

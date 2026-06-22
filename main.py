@@ -21,9 +21,7 @@ import sys
 import io
 import json
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-
-# 从 .env 文件加载 Cookie
+# 从 .env 文件加载 Cookie（支持引号包裹的值）
 _env_path = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(_env_path):
     with open(_env_path, "r", encoding="utf-8") as _f:
@@ -31,7 +29,8 @@ if os.path.exists(_env_path):
             _line = _line.strip()
             if _line and not _line.startswith("#") and "=" in _line:
                 _k, _v = _line.split("=", 1)
-                os.environ.setdefault(_k.strip(), _v.strip())
+                _v = _v.strip().strip('"').strip("'")
+                os.environ.setdefault(_k.strip(), _v)
 
 # 从 config.json 加载 Cookie（由 login.py 生成）
 _config_path = os.path.join(os.path.dirname(__file__), "config.json")
@@ -92,6 +91,11 @@ def _resolve_cookie(cli_cookie: str) -> str:
 
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    else:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="ZhihuSpider - 知乎内容爬虫")
     parser.add_argument("mode", nargs="?", choices=["question", "article", "answer", "config", "login"],
                         help="爬取模式")

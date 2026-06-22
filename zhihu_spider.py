@@ -52,7 +52,10 @@ def save_browser_answer_md(answer_data, output_dir):
     author = sanitize_filename(answer_data.get("author", "匿名用户"))
     title = sanitize_filename(answer_data.get("question_title", "未知问题"))
     voteup = answer_data.get("voteup", "0")
-    filename = f"[{voteup}赞] {author}.md"
+    answer_id = answer_data.get("id", "")
+    filename = f"[{voteup}赞] {author} - {title[:30]}.md"
+    if answer_id:
+        filename = f"[{voteup}赞] {author} - {answer_id}.md"
     filepath = os.path.join(output_dir, filename)
 
     header = f"""---
@@ -125,13 +128,13 @@ def crawl_question_answers(question_id, output_dir, cookie="", proxies=None, sor
 
     # 方式二：requests 失败，用浏览器爬
     print("\n[!] API 请求被拦截，切换到浏览器模式...")
-    _browser_crawl_question(question_id, output_dir)
+    _browser_crawl_question(question_id, output_dir, cookie=cookie)
 
 
-def _browser_crawl_question(question_id, output_dir):
+def _browser_crawl_question(question_id, output_dir, cookie=""):
     bc = None
     try:
-        bc = BrowserCrawler()
+        bc = BrowserCrawler(cookie=cookie)
         title = bc.get_question_title(question_id)
         print(f"问题标题: {title}" if title else f"问题 ID: {question_id}")
 
@@ -166,8 +169,8 @@ def crawl_article(article_id, output_dir, cookie="", proxies=None):
     article_data = crawler.get_article(article_id)
 
     if not article_data:
-        print("\n[!] 未获取到文章内容。")
-        print("    可能原因: 需要有效的 Cookie 或文章 ID 不存在")
+        print("\n[!] API 请求被拦截，切换到浏览器模式...")
+        _browser_crawl_article(article_id, output_dir, cookie=cookie)
         return
 
     meta = extract_article_metadata(article_data)
@@ -179,6 +182,33 @@ def crawl_article(article_id, output_dir, cookie="", proxies=None):
     print(f"\n完成！文章已保存到: {save_dir}")
 
 
+def _browser_crawl_article(article_id, output_dir, cookie=""):
+    bc = None
+    try:
+        bc = BrowserCrawler(cookie=cookie)
+        article_data = bc.get_article(article_id)
+        if not article_data:
+            print("\n[!] 未获取到文章内容。")
+            print("    可能原因: 文章 ID 不存在或网络异常")
+            return
+
+        title = sanitize_filename(article_data.get("title", "")) or f"article_{article_id}"
+        save_dir = os.path.join(output_dir, title)
+        os.makedirs(save_dir, exist_ok=True)
+
+        content_html = article_data.get("content", "")
+        content_md = html_to_markdown(content_html)
+        author = article_data.get("author", "")
+        filepath = os.path.join(save_dir, f"{author} - {title}.md")
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(f"---\ntitle: {article_data.get('title','')}\nauthor: {author}\nurl: https://zhuanlan.zhihu.com/p/{article_id}\n---\n\n")
+            f.write(content_md)
+        print(f"\n完成！文章已保存到: {filepath}")
+    finally:
+        if bc:
+            bc.close()
+
+
 def crawl_single_answer(answer_id, output_dir, cookie="", proxies=None):
     print(f"\n{'='*50}")
     print(f"开始爬取回答: {answer_id}")
@@ -188,7 +218,8 @@ def crawl_single_answer(answer_id, output_dir, cookie="", proxies=None):
     answer_data = crawler.get_answer(answer_id)
 
     if not answer_data:
-        print("\n[!] 未获取到回答内容。")
+        print("\n[!] API 请求被拦截，切换到浏览器模式...")
+        _browser_crawl_answer(answer_id, output_dir, cookie=cookie)
         return
 
     meta = extract_metadata(answer_data)
@@ -198,3 +229,29 @@ def crawl_single_answer(answer_id, output_dir, cookie="", proxies=None):
 
     save_answer_md(answer_data, save_dir)
     print(f"\n完成！回答已保存到: {save_dir}")
+
+
+def _browser_crawl_answer(answer_id, output_dir, cookie=""):
+    bc = None
+    try:
+        bc = BrowserCrawler(cookie=cookie)
+        answer_data = bc.get_answer(answer_id)
+        if not answer_data:
+            print("\n[!] 未获取到回答内容。")
+            return
+
+        title = sanitize_filename(answer_data.get("title", "")) or f"answer_{answer_id}"
+        save_dir = os.path.join(output_dir, title)
+        os.makedirs(save_dir, exist_ok=True)
+
+        content_html = answer_data.get("content", "")
+        content_md = html_to_markdown(content_html)
+        author = answer_data.get("author", "匿名用户")
+        filepath = os.path.join(save_dir, f"[{answer_data.get('voteup','0')}赞] {author}.md")
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(f"---\ntitle: {title}\nauthor: {author}\nurl: https://www.zhihu.com/answer/{answer_id}\n---\n\n")
+            f.write(content_md)
+        print(f"\n完成！回答已保存到: {filepath}")
+    finally:
+        if bc:
+            bc.close()

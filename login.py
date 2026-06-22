@@ -13,11 +13,10 @@ import os
 import re
 import json
 import sys
+import time
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 LOGIN_URL = "https://www.zhihu.com/signin?next=%2F"
-# Zhihu 的 API 域名，用于监听捕获 Cookie
-LISTEN_TARGET = "zhihu.com/api/v4"
 
 _ChromiumPage = None
 
@@ -32,10 +31,11 @@ def _get_browser():
             sys.exit(1)
     return _ChromiumPage
 
-# 不需要保留的 Cookie key 黑名单（知乎的无关 cookie）
+# 无关 Cookie 黑名单（统计分析/防刷类，与登录态无关）
+# 注：z_c0 是知乎登录令牌（老版），必须保留，不能进黑名单
 COOKIE_BLACKLIST = [
     "tgw_l7_", "_xsrf", "HMACCOUNT", "Hm_lvt_", "Hm_lpvt_",
-    "trc_cookie_storage", "z_c0", "KLBRSID",
+    "trc_cookie_storage", "KLBRSID",
 ]
 
 
@@ -73,16 +73,13 @@ def capture_cookie(headless: bool = False) -> str:
         page.get(LOGIN_URL)
 
         # 等待 URL 离开 /signin，说明登录成功
-        import time as _time
-        _time.sleep(5)
-        page.wait.url_change("https://www.zhihu.com/signin?next=%2F", timeout=120)
-        _time.sleep(3)
+        page.wait.url_change(LOGIN_URL, timeout=120)
+        time.sleep(3)
 
         # 登录成功后再跳转到首页，确保所有 Cookie 都刷新
         print("  → 登录成功！正在获取 Cookie...")
         page.get("https://www.zhihu.com/")
-        import time as _time
-        _time.sleep(3)
+        time.sleep(3)
 
         # 从浏览器获取全部 Cookie
         all_cookies = page.cookies()
