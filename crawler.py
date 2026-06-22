@@ -128,7 +128,7 @@ class ZhihuCrawler:
 
 # 浏览器 profile 持久化路径（复用登录态，避免每次裸启动）
 import os as _os
-_BROWSER_PROFILE = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "web_search.py_profile")
+_BROWSER_PROFILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".browser_profile")
 
 class BrowserCrawler:
     """基于 DrissionPage 的浏览器爬虫，绕过知乎反爬"""

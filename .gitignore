@@ -4,6 +4,9 @@
 # 登录 Cookie（login.py 生成，含敏感会话令牌）
 config.json
 
+# 浏览器 profile（DrissionPage 生成，含缓存/cookie）
+.browser_profile/
+
 # 爬取输出
 output/
 
