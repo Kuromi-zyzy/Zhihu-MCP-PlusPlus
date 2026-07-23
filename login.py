@@ -9,11 +9,12 @@ login.py -- 自动打开浏览器登录知乎，捕获 Cookie
     DrissionPage (pip install DrissionPage)
 """
 
-import os
-import re
 import json
+import os
 import sys
 import time
+
+import requests
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 LOGIN_URL = "https://www.zhihu.com/signin?next=%2F"
@@ -115,6 +116,26 @@ def capture_cookie(headless: bool = False) -> str:
     return cookie_str
 
 
+def validate_cookie(cookie_str):
+    """验证 Cookie 是否有效：调用 /api/v4/me 检查登录态。返回 (ok, info)。"""
+    try:
+        resp = requests.get(
+            "https://www.zhihu.com/api/v4/me",
+            headers={
+                "Cookie": cookie_str,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            name = data.get("name", "") or data.get("id", "")
+            return True, name
+        return False, f"HTTP {resp.status_code}"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
 def main(headless: bool = False):
     print("=" * 50)
     print("  ZhihuSpider - 知乎 Cookie 自动捕获")
@@ -126,6 +147,12 @@ def main(headless: bool = False):
             config = load_config()
             config["cookie"] = cookie
             save_config(config)
+            print("\n  → 正在验证 Cookie 有效性...")
+            ok, info = validate_cookie(cookie)
+            if ok:
+                print(f"  ✓ Cookie 有效！登录用户: {info}")
+            else:
+                print(f"  ⚠ Cookie 可能无效: {info}")
             print("\n  💡 现在可以运行爬虫了:")
             print("      python main.py question <问题ID>")
             print("      python main.py article  <文章ID>")

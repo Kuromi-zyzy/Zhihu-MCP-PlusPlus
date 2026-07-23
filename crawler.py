@@ -1,11 +1,12 @@
-import requests
-from bs4 import BeautifulSoup
-import re
-import time
 import json
 import random
+import re
 import sys
+import time
 import traceback
+
+import requests
+from bs4 import BeautifulSoup
 
 # ========== API 端点 (requests 方式, 会被知乎反爬拦截) ==========
 
@@ -127,8 +128,32 @@ class ZhihuCrawler:
 # ========== DrissionPage 浏览器方式（推荐，不会被拦截） ==========
 
 # 浏览器 profile 持久化路径（复用登录态，避免每次裸启动）
-import os as _os
+import os as _os  # noqa: E402
+
 _BROWSER_PROFILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".browser_profile")
+
+# 回答卡片选择器（多级兜底，知乎改版时只需更新这里）
+ANSWER_CARD_SELECTORS = [
+    "t:div@class=List-item",
+    "t:div@class=ContentItem",
+    "t:div@class=AnswerCard",
+    "t:div@class=Card",
+]
+
+# 文章正文选择器
+ARTICLE_CONTENT_SELECTORS = [
+    "t:div@class=Post-RichText",
+    "t:div@class=RichText",
+    "t:article",
+    "tag:div@class^=RichText",
+]
+
+# 单回答正文选择器
+ANSWER_CONTENT_SELECTORS = [
+    "t:div@class=RichContent-inner",
+    "t:div@class=RichText",
+]
+
 
 class BrowserCrawler:
     """基于 DrissionPage 的浏览器爬虫，绕过知乎反爬"""
@@ -140,7 +165,7 @@ class BrowserCrawler:
 
     def _get_page(self):
         if self._page is None:
-            from DrissionPage import ChromiumPage, ChromiumOptions
+            from DrissionPage import ChromiumOptions, ChromiumPage
             co = ChromiumOptions()
             if _os.path.exists(_BROWSER_PROFILE):
                 co.set_user_data_path(_BROWSER_PROFILE)
@@ -190,7 +215,7 @@ class BrowserCrawler:
     def get_question_title(self, question_id):
         page = self._get_page()
         url = f"https://www.zhihu.com/question/{question_id}"
-        print(f"  → 正在打开问题页面...")
+        print("  → 正在打开问题页面...")
         page.get(url)
         time.sleep(4)
         try:
@@ -205,7 +230,7 @@ class BrowserCrawler:
         url = f"https://www.zhihu.com/question/{question_id}"
         answers = []
 
-        print(f"  → 正在打开问题页面...")
+        print("  → 正在打开问题页面...")
         page.get(url)
         time.sleep(5)
 
@@ -250,14 +275,12 @@ class BrowserCrawler:
 
         # 提取所有回答卡片
         try:
-            # 多种选择器兜底
-            items = page.eles("t:div@class=List-item")
-            if not items:
-                items = page.eles("t:div@class=ContentItem")
-            if not items:
-                items = page.eles("t:div@class=AnswerCard")
-            if not items:
-                items = page.eles("t:div@class=Card")
+            # 多级选择器兜底，知乎改版时只需更新 ANSWER_CARD_SELECTORS
+            items = []
+            for selector in ANSWER_CARD_SELECTORS:
+                items = page.eles(selector)
+                if items:
+                    break
 
             print(f"  → 检测到 {len(items)} 个内容元素")
 
@@ -351,7 +374,7 @@ class BrowserCrawler:
         """浏览器模式获取文章"""
         page = self._get_page()
         url = f"https://zhuanlan.zhihu.com/p/{article_id}"
-        print(f"  → 正在打开文章页面...")
+        print("  → 正在打开文章页面...")
         page.get(url)
         time.sleep(5)
 
@@ -364,7 +387,7 @@ class BrowserCrawler:
             title_el = page.ele("tag:h1", timeout=10)
             title = title_el.text if title_el else ""
             content_html = ""
-            for selector in ["t:div@class=Post-RichText", "t:div@class=RichText", "t:article", "tag:div@class^=RichText"]:
+            for selector in ARTICLE_CONTENT_SELECTORS:
                 try:
                     content_el = page.ele(selector, timeout=3)
                     if content_el:
@@ -399,14 +422,16 @@ class BrowserCrawler:
         """浏览器模式获取单个回答"""
         page = self._get_page()
         url = f"https://www.zhihu.com/answer/{answer_id}"
-        print(f"  → 正在打开回答页面...")
+        print("  → 正在打开回答页面...")
         page.get(url)
         time.sleep(4)
 
         try:
-            content_el = page.ele("t:div@class=RichContent-inner", timeout=10)
-            if not content_el:
-                content_el = page.ele("t:div@class=RichText", timeout=5)
+            content_el = None
+            for i, selector in enumerate(ANSWER_CONTENT_SELECTORS):
+                content_el = page.ele(selector, timeout=10 if i == 0 else 5)
+                if content_el:
+                    break
             content_html = content_el.html if content_el else ""
             title = ""
             title_el = page.ele("tag:h1", timeout=5)

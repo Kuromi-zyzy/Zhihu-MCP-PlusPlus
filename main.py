@@ -16,10 +16,8 @@ ZhihuSpider - 知乎内容爬虫
 """
 
 import argparse
-import os
-import sys
-import io
 import json
+import os
 
 # 从 .env 文件加载 Cookie（支持引号包裹的值）
 _env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -43,7 +41,7 @@ if os.path.exists(_config_path):
     except (json.JSONDecodeError, IOError):
         pass
 
-from zhihu_spider import crawl_question_answers, crawl_article, crawl_single_answer
+from zhihu_spider import crawl_article, crawl_question_answers, crawl_single_answer  # noqa: E402
 
 
 def print_config_help():
@@ -91,10 +89,8 @@ def _resolve_cookie(cli_cookie: str) -> str:
 
 
 def main():
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    else:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    from log import setup_logging
+    setup_logging()
 
     parser = argparse.ArgumentParser(description="ZhihuSpider - 知乎内容爬虫")
     parser.add_argument("mode", nargs="?", choices=["question", "article", "answer", "config", "login"],

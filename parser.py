@@ -1,5 +1,6 @@
-from bs4 import BeautifulSoup
 import re
+
+from bs4 import BeautifulSoup
 
 
 def html_to_markdown(html_content):
@@ -58,6 +59,13 @@ def _parse_node(node):
                     if c.startswith("language-"):
                         lang = c.replace("language-", "")
                         break
+                if not lang:
+                    inner_code = child.find("code")
+                    if inner_code:
+                        for c in inner_code.get("class", []):
+                            if c.startswith("language-"):
+                                lang = c.replace("language-", "")
+                                break
                 code = child.get_text()
                 parts.append(f"\n```{lang}\n{code}\n```\n")
             else:
@@ -65,6 +73,13 @@ def _parse_node(node):
 
         elif tag == "hr":
             parts.append("\n---\n")
+
+        elif tag == "table":
+            table_md = _parse_table(child)
+            if table_md:
+                parts.append(f"\n{table_md}\n")
+            else:
+                parts.append(_parse_node(child))
 
         elif tag in ("figure", "div", "span", "section", "article"):
             parts.append(_parse_node(child))
@@ -75,6 +90,27 @@ def _parse_node(node):
                 parts.append(inner)
 
     return _clean_text("".join(parts))
+
+
+def _parse_table(table_node):
+    """将 <table> 转为 Markdown 表格。colspan/rowspan 降级为纯文本。"""
+    all_rows = table_node.find_all("tr")
+    if not all_rows:
+        return ""
+
+    lines = []
+    for i, tr in enumerate(all_rows):
+        cells = []
+        for cell in tr.find_all(["th", "td"], recursive=False):
+            text = _parse_inline(cell).strip()
+            text = text.replace("\n", " ").replace("|", "\\|")
+            cells.append(text)
+        if not cells:
+            continue
+        lines.append("| " + " | ".join(cells) + " |")
+        if i == 0:
+            lines.append("| " + " | ".join(["---"] * len(cells)) + " |")
+    return "\n".join(lines)
 
 
 def _parse_inline(node):
@@ -114,6 +150,8 @@ def _parse_inline(node):
             if text:
                 if " " in text or len(text) > 1:
                     parts.append(f"*{text}*")
+                else:
+                    parts.append(text)
 
         elif tag == "code":
             text = child.get_text()

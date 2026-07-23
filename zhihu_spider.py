@@ -1,8 +1,10 @@
+import json
 import os
-import time
 import re
-from crawler import ZhihuCrawler, BrowserCrawler
-from parser import html_to_markdown, extract_metadata, extract_article_metadata
+import time
+
+from crawler import BrowserCrawler, ZhihuCrawler
+from parser import extract_article_metadata, extract_metadata, html_to_markdown
 
 
 def timestamp_to_date(ts):
@@ -16,10 +18,40 @@ def sanitize_filename(name):
     return name or "untitled"
 
 
+def _load_progress(save_dir):
+    """读取已保存的 answer_id 集合，用于断点续传。"""
+    progress_file = os.path.join(save_dir, ".progress.json")
+    if os.path.exists(progress_file):
+        try:
+            with open(progress_file, "r", encoding="utf-8") as f:
+                return set(json.load(f).get("saved_ids", []))
+        except (json.JSONDecodeError, IOError):
+            pass
+    return set()
+
+
+def _save_progress(save_dir, saved_ids):
+    """更新进度文件。"""
+    progress_file = os.path.join(save_dir, ".progress.json")
+    with open(progress_file, "w", encoding="utf-8") as f:
+        json.dump({"saved_ids": list(saved_ids)}, f)
+
+
+def _write_md(filepath, front_matter, body):
+    """写 Markdown：YAML front matter + 正文。统一所有 save 路径的写文件逻辑。"""
+    header = "---\n"
+    for key, value in front_matter.items():
+        header += f"{key}: {value}\n"
+    header += "---\n\n"
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(header)
+        f.write(body)
+    return filepath
+
+
 def save_answer_md(answer_data, output_dir):
     meta = extract_metadata(answer_data)
-    content_html = answer_data.get("content", "")
-    content_md = html_to_markdown(content_html)
+    content_md = html_to_markdown(answer_data.get("content", ""))
 
     title = sanitize_filename(meta["title"])
     author = sanitize_filename(meta["author"])
@@ -27,27 +59,21 @@ def save_answer_md(answer_data, output_dir):
     filename = f"[{voteup}赞] {author} - {title}.md" if voteup else f"{author} - {title}.md"
     filename = sanitize_filename(filename)
     filepath = os.path.join(output_dir, filename)
+    created = timestamp_to_date(meta["created_time"]) if meta["created_time"] else "N/A"
 
-    header = f"""---
-title: {meta["title"]}
-author: {meta["author"]}
-voteup: {meta["voteup"]}
-url: {meta["url"]}
-created: {timestamp_to_date(meta["created_time"]) if meta["created_time"] else "N/A"}
----
-
-"""
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(header)
-        f.write(content_md)
-
+    _write_md(filepath, {
+        "title": meta["title"],
+        "author": meta["author"],
+        "voteup": meta["voteup"],
+        "url": meta["url"],
+        "created": created,
+    }, content_md)
     print(f"  ✓ 已保存: {filename}")
     return filepath
 
 
 def save_browser_answer_md(answer_data, output_dir):
-    content_html = answer_data.get("content", "")
-    content_md = html_to_markdown(content_html)
+    content_md = html_to_markdown(answer_data.get("content", ""))
 
     author = sanitize_filename(answer_data.get("author", "匿名用户"))
     title = sanitize_filename(answer_data.get("question_title", "未知问题"))
@@ -58,77 +84,81 @@ def save_browser_answer_md(answer_data, output_dir):
         filename = f"[{voteup}赞] {author} - {answer_id}.md"
     filepath = os.path.join(output_dir, filename)
 
-    header = f"""---
-title: {answer_data.get("question_title", "")}
-author: {answer_data.get("author", "")}
-voteup: {voteup}
-url: https://www.zhihu.com/question/{answer_data.get("question_id", "")}
----
-
-"""
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(header)
-        f.write(content_md)
-
+    _write_md(filepath, {
+        "title": answer_data.get("question_title", ""),
+        "author": answer_data.get("author", ""),
+        "voteup": voteup,
+        "url": f"https://www.zhihu.com/question/{answer_data.get('question_id', '')}",
+    }, content_md)
     print(f"  ✓ 已保存: {filename}")
     return filepath
 
 
 def save_article_md(article_data, output_dir):
     meta = extract_article_metadata(article_data)
-    content_html = article_data.get("content", "")
-    content_md = html_to_markdown(content_html)
+    content_md = html_to_markdown(article_data.get("content", ""))
 
     title = sanitize_filename(meta["title"])
     author = sanitize_filename(meta["author"])
-    filename = f"{author} - {title}.md"
-    filename = sanitize_filename(filename)
+    filename = sanitize_filename(f"{author} - {title}.md")
     filepath = os.path.join(output_dir, filename)
+    created = timestamp_to_date(meta["created_time"]) if meta["created_time"] else "N/A"
 
-    header = f"""---
-title: {meta["title"]}
-author: {meta["author"]}
-voteup: {meta["voteup"]}
-url: {meta["url"]}
-created: {timestamp_to_date(meta["created_time"]) if meta["created_time"] else "N/A"}
----
-
-"""
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(header)
-        f.write(content_md)
-
+    _write_md(filepath, {
+        "title": meta["title"],
+        "author": meta["author"],
+        "voteup": meta["voteup"],
+        "url": meta["url"],
+        "created": created,
+    }, content_md)
     print(f"  ✓ 已保存: {filename}")
     return filepath
 
 
-def crawl_question_answers(question_id, output_dir, cookie="", proxies=None, sort_by="default", max_pages=None):
+def _crawl_with_fallback(label, target_id, api_attempt, browser_fallback):
+    """先试 API，失败切浏览器。api_attempt 返回 True 表示成功已保存。"""
     print(f"\n{'='*50}")
-    print(f"开始爬取问题: {question_id}")
+    print(f"开始爬取{label}: {target_id}")
     print(f"{'='*50}\n")
+    if api_attempt():
+        return
+    print("\n[!] API 请求被拦截，切换到浏览器模式...")
+    browser_fallback()
 
-    # 方式一：先用 requests + API（可能被 403）
-    crawler = ZhihuCrawler(cookie=cookie, proxies=proxies)
-    title = crawler.get_question_title(question_id)
 
-    if title:
+def crawl_question_answers(question_id, output_dir, cookie="", proxies=None, sort_by="default", max_pages=None):
+    def api_attempt():
+        crawler = ZhihuCrawler(cookie=cookie, proxies=proxies)
+        title = crawler.get_question_title(question_id)
+        if not title:
+            return False
         print(f"问题标题: {title}")
         dir_name = sanitize_filename(f"[{question_id}] {title}")
         save_dir = os.path.join(output_dir, dir_name)
         os.makedirs(save_dir, exist_ok=True)
 
         answers = crawler.get_answers(question_id, sort_by=sort_by, max_pages=max_pages)
-        if answers:
-            print(f"\n共获取 {len(answers)} 条回答，正在保存...\n")
-            for ans in answers:
-                save_answer_md(ans, save_dir)
-                time.sleep(0.5)
-            print(f"\n完成！共保存 {len(answers)} 条回答到: {save_dir}")
-            return
+        if not answers:
+            return False
+        saved_ids = _load_progress(save_dir)
+        new_answers = [a for a in answers if str(a.get("id", "")) not in saved_ids]
+        if not new_answers:
+            print(f"\n所有 {len(answers)} 条回答已存在，跳过。")
+            return True
+        skipped = len(answers) - len(new_answers)
+        print(f"\n共获取 {len(answers)} 条，保存 {len(new_answers)} 条" + (f"（跳过 {skipped} 条已存在）" if skipped else "") + "...\n")
+        for ans in new_answers:
+            save_answer_md(ans, save_dir)
+            saved_ids.add(str(ans.get("id", "")))
+            _save_progress(save_dir, saved_ids)
+            time.sleep(0.5)
+        print(f"\n完成！共保存 {len(new_answers)} 条回答到: {save_dir}")
+        return True
 
-    # 方式二：requests 失败，用浏览器爬
-    print("\n[!] API 请求被拦截，切换到浏览器模式...")
-    _browser_crawl_question(question_id, output_dir, cookie=cookie)
+    _crawl_with_fallback(
+        "问题", question_id, api_attempt,
+        lambda: _browser_crawl_question(question_id, output_dir, cookie=cookie),
+    )
 
 
 def _browser_crawl_question(question_id, output_dir, cookie=""):
@@ -147,13 +177,21 @@ def _browser_crawl_question(question_id, output_dir, cookie=""):
             print("\n[!] 未获取到任何回答。")
             return
 
-        print(f"\n共获取 {len(answers)} 条回答，正在保存...\n")
-        for ans in answers:
+        saved_ids = _load_progress(save_dir)
+        new_answers = [a for a in answers if str(a.get("id", "")) not in saved_ids]
+        if not new_answers:
+            print(f"\n所有 {len(answers)} 条回答已存在，跳过。")
+            return
+        skipped = len(answers) - len(new_answers)
+        print(f"\n共获取 {len(answers)} 条，保存 {len(new_answers)} 条" + (f"（跳过 {skipped} 条已存在）" if skipped else "") + "...\n")
+        for ans in new_answers:
             save_browser_answer_md(ans, save_dir)
+            saved_ids.add(str(ans.get("id", "")))
+            _save_progress(save_dir, saved_ids)
             time.sleep(0.3)
 
         print(f"\n{'='*50}")
-        print(f"完成！共保存 {len(answers)} 条回答到: {save_dir}")
+        print(f"完成！共保存 {len(new_answers)} 条回答到: {save_dir}")
         print(f"{'='*50}")
     finally:
         if bc:
@@ -161,25 +199,24 @@ def _browser_crawl_question(question_id, output_dir, cookie=""):
 
 
 def crawl_article(article_id, output_dir, cookie="", proxies=None):
-    print(f"\n{'='*50}")
-    print(f"开始爬取文章: {article_id}")
-    print(f"{'='*50}\n")
+    def api_attempt():
+        crawler = ZhihuCrawler(cookie=cookie, proxies=proxies)
+        article_data = crawler.get_article(article_id)
+        if not article_data:
+            return False
+        meta = extract_article_metadata(article_data)
+        title = sanitize_filename(meta["title"]) if meta["title"] else f"article_{article_id}"
+        save_dir = os.path.join(output_dir, title)
+        os.makedirs(save_dir, exist_ok=True)
 
-    crawler = ZhihuCrawler(cookie=cookie, proxies=proxies)
-    article_data = crawler.get_article(article_id)
+        save_article_md(article_data, save_dir)
+        print(f"\n完成！文章已保存到: {save_dir}")
+        return True
 
-    if not article_data:
-        print("\n[!] API 请求被拦截，切换到浏览器模式...")
-        _browser_crawl_article(article_id, output_dir, cookie=cookie)
-        return
-
-    meta = extract_article_metadata(article_data)
-    title = sanitize_filename(meta["title"]) if meta["title"] else f"article_{article_id}"
-    save_dir = os.path.join(output_dir, title)
-    os.makedirs(save_dir, exist_ok=True)
-
-    save_article_md(article_data, save_dir)
-    print(f"\n完成！文章已保存到: {save_dir}")
+    _crawl_with_fallback(
+        "文章", article_id, api_attempt,
+        lambda: _browser_crawl_article(article_id, output_dir, cookie=cookie),
+    )
 
 
 def _browser_crawl_article(article_id, output_dir, cookie=""):
@@ -196,13 +233,14 @@ def _browser_crawl_article(article_id, output_dir, cookie=""):
         save_dir = os.path.join(output_dir, title)
         os.makedirs(save_dir, exist_ok=True)
 
-        content_html = article_data.get("content", "")
-        content_md = html_to_markdown(content_html)
+        content_md = html_to_markdown(article_data.get("content", ""))
         author = article_data.get("author", "")
         filepath = os.path.join(save_dir, f"{author} - {title}.md")
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(f"---\ntitle: {article_data.get('title','')}\nauthor: {author}\nurl: https://zhuanlan.zhihu.com/p/{article_id}\n---\n\n")
-            f.write(content_md)
+        _write_md(filepath, {
+            "title": article_data.get("title", ""),
+            "author": author,
+            "url": f"https://zhuanlan.zhihu.com/p/{article_id}",
+        }, content_md)
         print(f"\n完成！文章已保存到: {filepath}")
     finally:
         if bc:
@@ -210,25 +248,24 @@ def _browser_crawl_article(article_id, output_dir, cookie=""):
 
 
 def crawl_single_answer(answer_id, output_dir, cookie="", proxies=None):
-    print(f"\n{'='*50}")
-    print(f"开始爬取回答: {answer_id}")
-    print(f"{'='*50}\n")
+    def api_attempt():
+        crawler = ZhihuCrawler(cookie=cookie, proxies=proxies)
+        answer_data = crawler.get_answer(answer_id)
+        if not answer_data:
+            return False
+        meta = extract_metadata(answer_data)
+        title = sanitize_filename(meta["title"]) if meta["title"] else f"answer_{answer_id}"
+        save_dir = os.path.join(output_dir, title)
+        os.makedirs(save_dir, exist_ok=True)
 
-    crawler = ZhihuCrawler(cookie=cookie, proxies=proxies)
-    answer_data = crawler.get_answer(answer_id)
+        save_answer_md(answer_data, save_dir)
+        print(f"\n完成！回答已保存到: {save_dir}")
+        return True
 
-    if not answer_data:
-        print("\n[!] API 请求被拦截，切换到浏览器模式...")
-        _browser_crawl_answer(answer_id, output_dir, cookie=cookie)
-        return
-
-    meta = extract_metadata(answer_data)
-    title = sanitize_filename(meta["title"]) if meta["title"] else f"answer_{answer_id}"
-    save_dir = os.path.join(output_dir, title)
-    os.makedirs(save_dir, exist_ok=True)
-
-    save_answer_md(answer_data, save_dir)
-    print(f"\n完成！回答已保存到: {save_dir}")
+    _crawl_with_fallback(
+        "回答", answer_id, api_attempt,
+        lambda: _browser_crawl_answer(answer_id, output_dir, cookie=cookie),
+    )
 
 
 def _browser_crawl_answer(answer_id, output_dir, cookie=""):
@@ -244,13 +281,14 @@ def _browser_crawl_answer(answer_id, output_dir, cookie=""):
         save_dir = os.path.join(output_dir, title)
         os.makedirs(save_dir, exist_ok=True)
 
-        content_html = answer_data.get("content", "")
-        content_md = html_to_markdown(content_html)
+        content_md = html_to_markdown(answer_data.get("content", ""))
         author = answer_data.get("author", "匿名用户")
-        filepath = os.path.join(save_dir, f"[{answer_data.get('voteup','0')}赞] {author}.md")
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(f"---\ntitle: {title}\nauthor: {author}\nurl: https://www.zhihu.com/answer/{answer_id}\n---\n\n")
-            f.write(content_md)
+        filepath = os.path.join(save_dir, f"[{answer_data.get('voteup', '0')}赞] {author}.md")
+        _write_md(filepath, {
+            "title": title,
+            "author": author,
+            "url": f"https://www.zhihu.com/answer/{answer_id}",
+        }, content_md)
         print(f"\n完成！回答已保存到: {filepath}")
     finally:
         if bc:
