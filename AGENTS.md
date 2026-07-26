@@ -6,7 +6,7 @@
 
 - 测试: `uv run pytest`（纯函数，不依赖网络/浏览器）
 - Lint: `uv run ruff check .`（规则: E/F/W/I, line-length 120, 忽略 E501）
-- 运行: `python main.py {question|article|answer|login|config} [id]`
+- 运行: `python main.py {question|article|answer|collection|login|config} [id]`
   - 选项: `--sort {default|voteups|created}`, `--max-pages N`, `--proxy URL`, `--cookie STR`, `-o DIR`
   - `start.bat` 是交互菜单（不含 answer 模式）；`login`/`config` 不需要 id
 - 装依赖: `uv sync` 或 `pip install -r requirements.txt`

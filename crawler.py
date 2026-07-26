@@ -47,6 +47,20 @@ def android_answers_api(question_id, limit=20, offset=0, sort_by="default"):
         f"include={_INCLUDE_ANSWERS}&limit={limit}&offset={offset}&sort_by={sort_by}"
     )
 
+# ========== 收藏夹 API ==========
+
+_COLLECTION_INCLUDE = "data[*].content.title,content.type,content.url,content.excerpt_title,content.author.name,content.author.url_token,content.created,content.updated,content.voteup_count"
+_COLLECTION_INFO_INCLUDE = "title,description,updated,creator.name,creator.url_token,item_count,follow_count,comment_count"
+
+def collection_api(collection_id, limit=20, offset=0):
+    return (
+        f"https://www.zhihu.com/api/v4/collections/{collection_id}/items?"
+        f"include={_COLLECTION_INCLUDE}&limit={limit}&offset={offset}"
+    )
+
+def collection_info_api(collection_id):
+    return f"https://www.zhihu.com/api/v4/collections/{collection_id}?include={_COLLECTION_INFO_INCLUDE}"
+
 # ========== requests 方式（备用，可能被 403） ==========
 
 UA_POOL = [
@@ -199,6 +213,51 @@ class ZhihuCrawler:
             return resp.json().get("title", "")
         except json.JSONDecodeError:
             return None
+
+    def get_collection_info(self, collection_id):
+        url = collection_info_api(collection_id)
+        resp = self._try_signed_then_unsigned(url)
+        if resp is None:
+            return None
+        try:
+            data = resp.json()
+            return data.get("collection") or data
+        except json.JSONDecodeError:
+            return None
+
+    def get_collection_items(self, collection_id, max_pages=None):
+        offset = 0
+        page = 0
+        all_items = []
+        use_signed = bool(self._dc0)
+        while True:
+            url = collection_api(collection_id, offset=offset)
+            resp = self._request(url, use_signed=use_signed)
+            if resp is None and use_signed:
+                print("  [!] 签名请求被拦截，切换无签名请求...")
+                use_signed = False
+                resp = self._request(url, use_signed=False)
+            if resp is None:
+                break
+            try:
+                data = resp.json()
+            except json.JSONDecodeError:
+                break
+            items = data.get("data", [])
+            if not items:
+                break
+            all_items.extend(items)
+            offset += len(items)
+            page += 1
+            print(f"  → 已获取 {len(all_items)} 条收藏")
+            if max_pages and page >= max_pages:
+                break
+            paging = data.get("paging", {})
+            if not paging.get("is_end", True):
+                time.sleep(3)
+            else:
+                break
+        return all_items
 
 
 # ========== DrissionPage 浏览器方式（推荐，不会被拦截） ==========
@@ -533,3 +592,54 @@ class BrowserCrawler:
         except Exception as e:
             print(f"  [!] 回答提取失败: {type(e).__name__}: {e}", file=sys.stderr)
             return None
+
+    def get_collection_items(self, collection_id):
+        """浏览器模式获取收藏夹内容列表"""
+        page = self._get_page()
+        url = f"https://www.zhihu.com/collection/{collection_id}"
+        print("  → 正在打开收藏夹页面...")
+        page.get(url)
+        time.sleep(5)
+
+        items = []
+        question_title = f"collection_{collection_id}"
+        try:
+            title_el = page.ele("tag:h1", timeout=5)
+            if title_el:
+                question_title = title_el.text
+        except Exception:
+            pass
+
+        # 滚动加载
+        print("  → 正在滚动加载更多收藏...")
+        for scroll_round in range(20):
+            page.run_js("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(2)
+            new_h = page.run_js("return document.body.scrollHeight")
+            old_h = page.run_js("return document.body.scrollHeight")
+            if new_h == old_h and scroll_round > 3:
+                break
+
+        try:
+            cards = page.eles("t:div@class=CollectionItem")
+            if not cards:
+                cards = page.eles("t:div@class=ContentItem")
+            print(f"  → 检测到 {len(cards)} 个内容元素")
+            for card in cards:
+                html = card.html if hasattr(card, 'html') else str(card)
+                soup = BeautifulSoup(html, "html.parser")
+                link = soup.find("a", href=re.compile(r"/(answer|question|p)/"))
+                url_str = f"https://www.zhihu.com{link['href']}" if link and link.get("href") else ""
+                title_tag = soup.find("h2") or soup.find("a", class_=re.compile(r"Title"))
+                title = title_tag.get_text(strip=True) if title_tag else ""
+                author_el = soup.find("a", class_=re.compile(r"UserLink-link"))
+                author = author_el.get_text(strip=True) if author_el else "匿名用户"
+                items.append({
+                    "title": title,
+                    "url": url_str,
+                    "author": author,
+                    "content": {"excerpt_title": title},
+                })
+        except Exception as e:
+            print(f"  [!] 提取失败: {type(e).__name__}: {e}", file=sys.stderr)
+        return items, question_title

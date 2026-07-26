@@ -293,3 +293,105 @@ def _browser_crawl_answer(answer_id, output_dir, cookie=""):
     finally:
         if bc:
             bc.close()
+
+
+def crawl_collection(collection_id, output_dir, cookie="", proxies=None, max_pages=None):
+    def api_attempt():
+        crawler = ZhihuCrawler(cookie=cookie, proxies=proxies)
+
+        info = crawler.get_collection_info(collection_id)
+        coll_title = info.get("title", f"collection_{collection_id}") if info else f"collection_{collection_id}"
+        print(f"收藏夹: {coll_title}")
+
+        dir_name = sanitize_filename(f"[{collection_id}] {coll_title}")
+        save_dir = os.path.join(output_dir, dir_name)
+        os.makedirs(save_dir, exist_ok=True)
+
+        items = crawler.get_collection_items(collection_id, max_pages=max_pages)
+        if not items:
+            return False
+
+        saved_ids = _load_progress(save_dir)
+        def _item_url(item):
+            return item.get("content", {}).get("url", "")
+        new_items = [it for it in items if _item_url(it) not in saved_ids]
+        skipped = len(items) - len(new_items)
+
+        print(f"\n共获取 {len(items)} 条，保存 {len(new_items)} 条" +
+              (f"（跳过 {skipped} 条已存在）" if skipped else "") + "...\n")
+        for item in new_items:
+            c = item.get("content", {})
+            item_url = _item_url(item)
+            item_type = c.get("type", "unknown")
+            title = c.get("title", "") or (c.get("question", {}) or {}).get("title", "")
+            author = c.get("author", {})
+            author_name = author.get("name", "") if isinstance(author, dict) else ""
+            voteup = c.get("voteup_count", 0)
+
+            front_matter = {
+                "title": title,
+                "author": author_name,
+                "type": item_type,
+                "voteup": voteup,
+                "url": item_url,
+            }
+            excerpt = c.get("excerpt_title", "") or c.get("excerpt", "")
+            item_id = ""
+            if "/p/" in item_url:
+                item_id = item_url.split("/p/")[-1].split("?")[0]
+                front_matter["article_id"] = item_id
+            elif "/answer/" in item_url:
+                item_id = item_url.split("/answer/")[-1].split("?")[0]
+                front_matter["answer_id"] = item_id
+
+            filename = sanitize_filename(f"{author_name} - {title}.md" if title else f"{item_type}_{item_id}.md")
+            filepath = os.path.join(save_dir, filename)
+            _write_md(filepath, front_matter, excerpt)
+            print(f"  ✓ {filename}")
+
+            saved_ids.add(item_url)
+            _save_progress(save_dir, saved_ids)
+            time.sleep(0.3)
+
+        print(f"\n完成！共保存 {len(new_items)} 条收藏到: {save_dir}")
+        return True
+
+    _crawl_with_fallback(
+        "收藏夹", collection_id, api_attempt,
+        lambda: _browser_crawl_collection(collection_id, output_dir, cookie=cookie),
+    )
+
+
+def _browser_crawl_collection(collection_id, output_dir, cookie=""):
+    bc = None
+    try:
+        bc = BrowserCrawler(cookie=cookie)
+        items, coll_title = bc.get_collection_items(collection_id)
+        if not items:
+            print("\n[!] 未获取到收藏夹内容。")
+            return
+
+        dir_name = sanitize_filename(f"[{collection_id}] {coll_title}")
+        save_dir = os.path.join(output_dir, dir_name)
+        os.makedirs(save_dir, exist_ok=True)
+
+        print(f"\n共获取 {len(items)} 条...\n")
+        for item in items:
+            title = item.get("title", "")
+            author = item.get("author", "匿名用户")
+            url_str = item.get("url", "")
+            excerpt = item.get("content", {}).get("excerpt_title", "")
+
+            filename = sanitize_filename(f"{author} - {title}.md" if title else f"{url_str.split('/')[-1]}.md")
+            filepath = os.path.join(save_dir, filename)
+            _write_md(filepath, {
+                "title": title,
+                "author": author,
+                "url": url_str,
+            }, excerpt)
+            print(f"  ✓ {filename}")
+
+        print(f"\n完成！共保存 {len(items)} 条收藏到: {save_dir}")
+    finally:
+        if bc:
+            bc.close()
