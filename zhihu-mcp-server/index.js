@@ -12,6 +12,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { signRequest } from './zse-signer.js';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,6 +20,7 @@ import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const SPIDER_DIR = path.resolve(__dirname, '..'); // project root with main.py
 
 const CONFIG_DIR = path.join(os.homedir(), '.zhihu-mcp');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
@@ -298,6 +300,78 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {}
         }
+      },
+      {
+        name: 'zhihu_save_question',
+        description: '将知乎问题下的回答保存到本地 Markdown 文件。调用 Python 爬虫。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            question_id: {
+              type: 'string',
+              description: '问题 ID'
+            },
+            max_pages: {
+              type: 'number',
+              description: '最大爬取页数（每页 20 条），默认不限',
+              default: null
+            },
+            sort: {
+              type: 'string',
+              description: '排序方式',
+              enum: ['default', 'voteups', 'created'],
+              default: 'default'
+            }
+          },
+          required: ['question_id']
+        }
+      },
+      {
+        name: 'zhihu_save_answer',
+        description: '将单个知乎回答保存到本地 Markdown 文件。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            answer_id: {
+              type: 'string',
+              description: '回答 ID'
+            }
+          },
+          required: ['answer_id']
+        }
+      },
+      {
+        name: 'zhihu_save_article',
+        description: '将知乎专栏文章保存到本地 Markdown 文件。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            article_id: {
+              type: 'string',
+              description: '文章 ID'
+            }
+          },
+          required: ['article_id']
+        }
+      },
+      {
+        name: 'zhihu_save_collection',
+        description: '将知乎收藏夹中的内容保存到本地 Markdown 文件。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            collection_id: {
+              type: 'string',
+              description: '收藏夹 ID'
+            },
+            max_pages: {
+              type: 'number',
+              description: '最大爬取页数，默认不限',
+              default: null
+            }
+          },
+          required: ['collection_id']
+        }
       }
     ]
   };
@@ -483,6 +557,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
           ]
         };
+      }
+
+      case 'zhihu_save_question': {
+        const { question_id, max_pages, sort } = args;
+        let cmd = `python main.py question ${question_id}`;
+        if (sort) cmd += ` --sort ${sort}`;
+        if (max_pages) cmd += ` --max-pages ${max_pages}`;
+        const output = execSync(cmd, { cwd: SPIDER_DIR, encoding: 'utf8', timeout: 120000 });
+        return { content: [{ type: 'text', text: output }] };
+      }
+
+      case 'zhihu_save_answer': {
+        const cmd = `python main.py answer ${args.answer_id}`;
+        const output = execSync(cmd, { cwd: SPIDER_DIR, encoding: 'utf8', timeout: 60000 });
+        return { content: [{ type: 'text', text: output }] };
+      }
+
+      case 'zhihu_save_article': {
+        const cmd = `python main.py article ${args.article_id}`;
+        const output = execSync(cmd, { cwd: SPIDER_DIR, encoding: 'utf8', timeout: 60000 });
+        return { content: [{ type: 'text', text: output }] };
+      }
+
+      case 'zhihu_save_collection': {
+        const { collection_id, max_pages } = args;
+        let cmd = `python main.py collection ${collection_id}`;
+        if (max_pages) cmd += ` --max-pages ${max_pages}`;
+        const output = execSync(cmd, { cwd: SPIDER_DIR, encoding: 'utf8', timeout: 180000 });
+        return { content: [{ type: 'text', text: output }] };
       }
 
       default:

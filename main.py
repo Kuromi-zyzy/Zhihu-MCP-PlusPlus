@@ -8,6 +8,9 @@ ZhihuSpider - 知乎内容爬虫
     python main.py article <article_id> [-o <输出目录>]
     python main.py answer <answer_id> [-o <输出目录>]
     python main.py collection <collection_id> [-o <输出目录>]
+    python main.py topic <topic_id> [-o <输出目录>]
+    python main.py user <user_token> [answers|articles] [-o <输出目录>]
+    python main.py column <column_id> [-o <输出目录>]
     python main.py config                      # 显示配置说明
 
 示例:
@@ -15,6 +18,9 @@ ZhihuSpider - 知乎内容爬虫
     python main.py article 66900790
     python main.py answer 475819518
     python main.py collection 960833771
+    python main.py topic 19776749
+    python main.py user ai-fan-er answers
+    python main.py column zhihu
 """
 
 import argparse
@@ -43,7 +49,15 @@ if os.path.exists(_config_path):
     except (json.JSONDecodeError, IOError):
         pass
 
-from zhihu_spider import crawl_article, crawl_collection, crawl_question_answers, crawl_single_answer  # noqa: E402
+from zhihu_spider import (  # noqa: E402
+    crawl_article,
+    crawl_collection,
+    crawl_column,
+    crawl_question_answers,
+    crawl_single_answer,
+    crawl_topic_essence,
+    crawl_user,
+)
 
 
 def print_config_help():
@@ -95,7 +109,7 @@ def main():
     setup_logging()
 
     parser = argparse.ArgumentParser(description="ZhihuSpider - 知乎内容爬虫")
-    parser.add_argument("mode", nargs="?", choices=["question", "article", "answer", "collection", "config", "login"],
+    parser.add_argument("mode", nargs="?", choices=["question", "article", "answer", "collection", "topic", "user", "column", "config", "login"],
                         help="爬取模式")
     parser.add_argument("id", nargs="?", help="目标 ID")
     parser.add_argument("-o", "--output", default=os.path.join(os.path.dirname(__file__), "output"),
@@ -166,6 +180,42 @@ def main():
             return
         crawl_collection(
             collection_id=args.id,
+            output_dir=args.output,
+            cookie=cookie,
+            proxies=proxies,
+            max_pages=args.max_pages,
+        )
+    elif args.mode == "topic":
+        if not args.id:
+            print("[!] 请提供 topic_id")
+            return
+        crawl_topic_essence(
+            topic_id=args.id,
+            output_dir=args.output,
+            cookie=cookie,
+            proxies=proxies,
+            max_pages=args.max_pages,
+        )
+    elif args.mode == "user":
+        if not args.id:
+            print("[!] 请提供 user_token")
+            return
+        import sys
+        sub_mode = sys.argv[sys.argv.index("user") + 2] if len(sys.argv) > sys.argv.index("user") + 2 else "answers"
+        crawl_user(
+            user_token=args.id,
+            mode=sub_mode,
+            output_dir=args.output,
+            cookie=cookie,
+            proxies=proxies,
+            max_pages=args.max_pages,
+        )
+    elif args.mode == "column":
+        if not args.id:
+            print("[!] 请提供 column_id")
+            return
+        crawl_column(
+            column_id=args.id,
             output_dir=args.output,
             cookie=cookie,
             proxies=proxies,

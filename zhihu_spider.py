@@ -3,6 +3,8 @@ import os
 import re
 import time
 
+from bs4 import BeautifulSoup
+
 from crawler import BrowserCrawler, ZhihuCrawler
 from parser import extract_article_metadata, extract_metadata, html_to_markdown
 
@@ -392,6 +394,251 @@ def _browser_crawl_collection(collection_id, output_dir, cookie=""):
             print(f"  ✓ {filename}")
 
         print(f"\n完成！共保存 {len(items)} 条收藏到: {save_dir}")
+    finally:
+        if bc:
+            bc.close()
+
+
+def crawl_topic_essence(topic_id, output_dir, cookie="", proxies=None, max_pages=None):
+    def api_attempt():
+        crawler = ZhihuCrawler(cookie=cookie, proxies=proxies)
+        info = crawler.get_topic_info(topic_id)
+        topic_name = info.get("name", f"topic_{topic_id}") if info else f"topic_{topic_id}"
+        print(f"话题: {topic_name}")
+
+        dir_name = sanitize_filename(f"[{topic_id}] {topic_name}")
+        save_dir = os.path.join(output_dir, dir_name)
+        os.makedirs(save_dir, exist_ok=True)
+
+        items = crawler.get_topic_essence(topic_id, max_pages=max_pages)
+        if not items:
+            return False
+
+        saved_ids = _load_progress(save_dir)
+        def _item_key(it):
+            t = it.get("target", {})
+            return t.get("url", "")
+        new_items = [it for it in items if _item_key(it) not in saved_ids]
+        skipped = len(items) - len(new_items)
+
+        print(f"\n共获取 {len(items)} 条，保存 {len(new_items)} 条" +
+              (f"（跳过 {skipped} 条已存在）" if skipped else "") + "...\n")
+        for item in new_items:
+            t = item.get("target", {})
+            item_url = t.get("url", "")
+            item_type = t.get("type", "unknown")
+            title = t.get("title", "") or (t.get("question", {}) or {}).get("title", "")
+            author = t.get("author", {})
+            author_name = author.get("name", "") if isinstance(author, dict) else ""
+            voteup = t.get("voteup_count", 0)
+
+            content_md = html_to_markdown(t.get("content", ""))
+            front_matter = {
+                "title": title,
+                "author": author_name,
+                "type": item_type,
+                "voteup": voteup,
+                "url": item_url,
+            }
+
+            filename = sanitize_filename(f"{author_name} - {title}.md" if title else f"{item_type}.md")
+            filepath = os.path.join(save_dir, filename)
+            _write_md(filepath, front_matter, content_md)
+            print(f"  ✓ {filename}")
+
+            saved_ids.add(item_url)
+            _save_progress(save_dir, saved_ids)
+            time.sleep(0.3)
+
+        print(f"\n完成！共保存 {len(new_items)} 条精华到: {save_dir}")
+        return True
+
+    _crawl_with_fallback(
+        "话题精华", topic_id, api_attempt,
+        lambda: print("\n  [!] 话题精华浏览器兜底暂未实现"),
+    )
+
+
+def crawl_user(user_token, mode, output_dir, cookie="", proxies=None, max_pages=None):
+    """mode: 'answers' 或 'articles'"""
+    label = "用户回答" if mode == "answers" else "用户文章"
+    bc = None
+    try:
+        bc = BrowserCrawler(cookie=cookie)
+        page = bc._get_page()
+        url = f"https://www.zhihu.com/people/{user_token}/{'answers' if mode == 'answers' else 'posts'}"
+        print("  → 正在打开用户页面...")
+        page.get(url)
+        time.sleep(5)
+
+        user_name = user_token
+        try:
+            name_el = page.ele("t:span@class=ProfileHeader-name", timeout=5)
+            if name_el:
+                user_name = name_el.text
+        except Exception:
+            pass
+        print(f"用户: {user_name}")
+
+        dir_name = sanitize_filename(f"[{user_token}] {user_name} - {label}")
+        save_dir = os.path.join(output_dir, dir_name)
+        os.makedirs(save_dir, exist_ok=True)
+
+        # 滚动加载
+        print("  → 正在滚动加载...")
+        last_h = page.run_js("return document.body.scrollHeight")
+        stable = 0
+        scroll_rounds = max_pages * 2 if max_pages else 30
+        for _ in range(scroll_rounds):
+            page.run_js("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(2)
+            new_h = page.run_js("return document.body.scrollHeight")
+            if new_h == last_h:
+                stable += 1
+                if stable >= 2:
+                    break
+            else:
+                stable = 0
+                last_h = new_h
+
+        cards = page.eles("t:div@class=ContentItem")
+        print(f"  → 检测到 {len(cards)} 个内容元素")
+
+        saved_ids = _load_progress(save_dir)
+        count = 0
+        for card in cards:
+            html = card.html if hasattr(card, "html") else str(card)
+            soup = BeautifulSoup(html, "html.parser")
+            link = soup.find("a", href=re.compile(r"/(answer|p)/"))
+            if not link:
+                continue
+            url_str = f"https://www.zhihu.com{link['href']}"
+            item_id = url_str.split("/")[-1].split("?")[0]
+            if item_id in saved_ids:
+                continue
+
+            voteup = "0"
+            ve = soup.find("button", class_=re.compile(r"VoteButton"))
+            if ve:
+                voteup = ve.get_text(strip=True) or "0"
+            title = ""
+            title_el = soup.find("h2") or soup.find("a", class_=re.compile(r"Title"))
+            if title_el:
+                title = title_el.get_text(strip=True)
+            author_el = soup.find("a", class_=re.compile(r"UserLink-link"))
+            author = author_el.get_text(strip=True) if author_el else user_name
+
+            content_div = soup.find("div", class_=re.compile(r"RichContent-inner"))
+            content_html = str(content_div) if content_div else ""
+            content_md = html_to_markdown(content_html)
+
+            filename = sanitize_filename(f"[{voteup}赞] {author} - {title}.md" if title else f"{author} - {item_id}.md")
+            filepath = os.path.join(save_dir, filename)
+            _write_md(filepath, {
+                "title": title,
+                "author": author,
+                "voteup": voteup,
+                "url": url_str,
+            }, content_md)
+            print(f"  ✓ {filename}")
+            saved_ids.add(item_id)
+            _save_progress(save_dir, saved_ids)
+            count += 1
+            time.sleep(0.3)
+
+        print(f"\n完成！共保存 {count} 条{label}到: {save_dir}")
+    finally:
+        if bc:
+            bc.close()
+
+
+def crawl_column(column_id, output_dir, cookie="", proxies=None, max_pages=None):
+    bc = None
+    try:
+        bc = BrowserCrawler(cookie=cookie)
+        page = bc._get_page()
+        url = f"https://www.zhihu.com/column/{column_id}"
+        print("  → 正在打开专栏页面...")
+        page.get(url)
+        time.sleep(5)
+
+        col_title = column_id
+        try:
+            title_el = page.ele("tag:h1", timeout=5)
+            if title_el:
+                col_title = title_el.text
+        except Exception:
+            pass
+        print(f"专栏: {col_title}")
+
+        dir_name = sanitize_filename(f"[{column_id}] {col_title}")
+        save_dir = os.path.join(output_dir, dir_name)
+        os.makedirs(save_dir, exist_ok=True)
+
+        print("  → 正在滚动加载...")
+        last_h = page.run_js("return document.body.scrollHeight")
+        stable = 0
+        scroll_rounds = max_pages * 2 if max_pages else 20
+        for _ in range(scroll_rounds):
+            page.run_js("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(2)
+            new_h = page.run_js("return document.body.scrollHeight")
+            if new_h == last_h:
+                stable += 1
+                if stable >= 2:
+                    break
+            else:
+                stable = 0
+                last_h = new_h
+
+        cards = page.eles("t:div@class=ColumnArticleItem")
+        if not cards:
+            cards = page.eles("t:div@class=ContentItem")
+        print(f"  → 检测到 {len(cards)} 个内容元素")
+
+        saved_ids = _load_progress(save_dir)
+        count = 0
+        for card in cards:
+            html = card.html if hasattr(card, "html") else str(card)
+            soup = BeautifulSoup(html, "html.parser")
+            link = soup.find("a", href=re.compile(r"/p/"))
+            if not link:
+                continue
+            article_id = link["href"].split("/p/")[-1].split("?")[0]
+            if article_id in saved_ids:
+                continue
+
+            title = ""
+            title_el = soup.find("h2") or soup.find("a", class_=re.compile(r"Title"))
+            if title_el:
+                title = title_el.get_text(strip=True)
+            author_el = soup.find("a", class_=re.compile(r"UserLink-link"))
+            author = author_el.get_text(strip=True) if author_el else ""
+            voteup = "0"
+            ve = soup.find("button", class_=re.compile(r"VoteButton"))
+            if ve:
+                voteup = ve.get_text(strip=True) or "0"
+
+            excerpt = ""
+            excerpt_el = soup.find("div", class_=re.compile(r"RichText"))
+            if excerpt_el:
+                excerpt = excerpt_el.get_text(strip=True)[:200]
+
+            filename = sanitize_filename(f"{author} - {title}.md" if title else f"{article_id}.md")
+            filepath = os.path.join(save_dir, filename)
+            _write_md(filepath, {
+                "title": title,
+                "author": author,
+                "voteup": voteup,
+                "url": f"https://zhuanlan.zhihu.com/p/{article_id}",
+            }, excerpt)
+            print(f"  ✓ {filename}")
+            saved_ids.add(article_id)
+            _save_progress(save_dir, saved_ids)
+            count += 1
+            time.sleep(0.3)
+
+        print(f"\n完成！共保存 {count} 篇文章到: {save_dir}")
     finally:
         if bc:
             bc.close()

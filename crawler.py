@@ -61,6 +61,19 @@ def collection_api(collection_id, limit=20, offset=0):
 def collection_info_api(collection_id):
     return f"https://www.zhihu.com/api/v4/collections/{collection_id}?include={_COLLECTION_INFO_INCLUDE}"
 
+# ========== 话题精华 API ==========
+
+_TOPIC_ESSENCE_INCLUDE = "data[*].target.type,target.title,target.content,target.voteup_count,target.comment_count,target.created_time,target.updated_time,target.author.name,target.author.url_token,target.question.title,target.url"
+
+def topic_info_api(topic_id):
+    return f"https://www.zhihu.com/api/v4/topics/{topic_id}?include=name,description"
+
+def topic_essence_api(topic_id, limit=20, offset=0):
+    return (
+        f"https://www.zhihu.com/api/v4/topics/{topic_id}/feeds/essence?"
+        f"include={_TOPIC_ESSENCE_INCLUDE}&limit={limit}&offset={offset}"
+    )
+
 # ========== requests 方式（备用，可能被 403） ==========
 
 UA_POOL = [
@@ -250,6 +263,50 @@ class ZhihuCrawler:
             offset += len(items)
             page += 1
             print(f"  → 已获取 {len(all_items)} 条收藏")
+            if max_pages and page >= max_pages:
+                break
+            paging = data.get("paging", {})
+            if not paging.get("is_end", True):
+                time.sleep(3)
+            else:
+                break
+        return all_items
+
+    def get_topic_info(self, topic_id):
+        url = topic_info_api(topic_id)
+        resp = self._try_signed_then_unsigned(url)
+        if resp is None:
+            return None
+        try:
+            return resp.json()
+        except json.JSONDecodeError:
+            return None
+
+    def get_topic_essence(self, topic_id, max_pages=None):
+        offset = 0
+        page = 0
+        all_items = []
+        use_signed = bool(self._dc0)
+        while True:
+            url = topic_essence_api(topic_id, offset=offset)
+            resp = self._request(url, use_signed=use_signed)
+            if resp is None and use_signed:
+                print("  [!] 签名请求被拦截，切换无签名请求...")
+                use_signed = False
+                resp = self._request(url, use_signed=False)
+            if resp is None:
+                break
+            try:
+                data = resp.json()
+            except json.JSONDecodeError:
+                break
+            items = data.get("data", [])
+            if not items:
+                break
+            all_items.extend(items)
+            offset += len(items)
+            page += 1
+            print(f"  → 已获取 {len(all_items)} 条话题精华")
             if max_pages and page >= max_pages:
                 break
             paging = data.get("paging", {})
@@ -643,3 +700,43 @@ class BrowserCrawler:
         except Exception as e:
             print(f"  [!] 提取失败: {type(e).__name__}: {e}", file=sys.stderr)
         return items, question_title
+
+    def _browser_scroll_and_extract(self, url, card_selector, extract_func, scroll_rounds=20):
+        """通用滚动页面提取内容"""
+        page = self._get_page()
+        print("  → 正在打开页面...")
+        page.get(url)
+        time.sleep(5)
+
+        title = ""
+        try:
+            title_el = page.ele("tag:h1", timeout=5)
+            if title_el:
+                title = title_el.text
+        except Exception:
+            pass
+
+        print("  → 正在滚动加载更多...")
+        last_h = page.run_js("return document.body.scrollHeight")
+        stable = 0
+        for _ in range(scroll_rounds):
+            page.run_js("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(2)
+            new_h = page.run_js("return document.body.scrollHeight")
+            if new_h == last_h:
+                stable += 1
+                if stable >= 2:
+                    break
+            else:
+                stable = 0
+                last_h = new_h
+
+        items = page.eles(card_selector) if card_selector else []
+        print(f"  → 检测到 {len(items)} 个内容元素")
+        results = []
+        for el in items:
+            try:
+                results.append(extract_func(el))
+            except Exception:
+                pass
+        return results, title
