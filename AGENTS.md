@@ -1,38 +1,55 @@
 # AGENTS.md
 
-知乎内容爬虫。Python 3.11+，Windows 优先。测试用 `uv run pytest`，lint 用 `uv run ruff check .`（规则温和：E/F/W/I）。无 typecheck 配置。
+知乎内容爬虫。Python 3.11+，Windows 优先。
 
-## 入口
+## 命令
 
-`python main.py {question|article|answer|login|config} <id>`。`start.bat` 是交互菜单包装。README 只列了前三种模式，`login`、`config` 子命令同样可用。完整 CLI 选项见 `main.py` argparse：`--sort default|voteups|created`、`--max-pages`、`--proxy`、`--cookie`、`-o`。
+- 测试: `uv run pytest`（纯函数，不依赖网络/浏览器）
+- Lint: `uv run ruff check .`（规则: E/F/W/I, line-length 120, 忽略 E501）
+- 运行: `python main.py {question|article|answer|login|config} [id]`
+  - 选项: `--sort {default|voteups|created}`, `--max-pages N`, `--proxy URL`, `--cookie STR`, `-o DIR`
+  - `start.bat` 是交互菜单（不含 answer 模式）；`login`/`config` 不需要 id
+- 装依赖: `uv sync` 或 `pip install -r requirements.txt`
+- 装 dev 工具: `uv sync --all-groups`
 
-## 架构（非显而易见的关键事实）
+## 架构
 
-- **双轨兜底是核心设计**：`zhihu_spider.py` 每个模式都用 `ZhihuCrawler`（requests + 知乎 API）先试，遇 403 或空数据自动切 `BrowserCrawler`（DrissionPage 浏览器）。不要把兜底当 bug 删。
-- **真实模块全在根目录**：`crawler.py`（请求层 + 浏览器层）、`parser.py`（HTML→Markdown）、`zhihu_spider.py`（编排 + 文件保存）、`login.py`（Cookie 捕获）。
-- **`util/` 是空脚手架，无任何代码引用**。别当包结构来改。
-- **`web_search.py` 是独立工具**（DuckDuckGo/Bing 搜索 + URL 抓取，带 SSRF 防护），有自己的 CLI 和 `main()`，不被爬虫导入。改爬虫别动它，反之亦然。
+- **三层递进**: `ZhihuCrawler` 现在有三层反爬策略——带签名 requests（zse96 v2）→ Android API 通道 → `BrowserCrawler` 浏览器兜底。遇 403 自动降级。
+- **`zse_signer.py`**: 从 zhihu-plus-plus 移植的 zse96 v2 签名算法，`sign_request(url, d_c0)` → `2.0_[signature]`。ZhihuCrawler 有 d_c0 时自动签名。
+- **`zhihu-mcp-server/`**: Node.js MCP 服务（来自 iteng007/zhihu-mcp-server），接入 opencode 后可在 AI 对话中实时查询知乎。
+- **模块全在根目录**: `crawler.py`、`parser.py`、`zse_signer.py`、`zhihu_spider.py`、`login.py`。`util/` 和 `zhihu/` 都是空脚手架，无代码引用。
+- **`web_search.py` 是独立工具**（DuckDuckGo/Bing 搜索），有自己的 CLI 和 `main()`，不被爬虫导入。改爬虫别动它。
 
 ## Cookie 与敏感文件
 
-- `config.json`（`login.py` 写入的会话 Cookie）、`.env`、`.browser_profile/`（Chromium 用户数据）**都已 gitignore，含真实登录令牌**。永远不要提交、不要把内容贴进日志/PR/commit。
-- Cookie 优先级（`main.py` `_resolve_cookie`，顺序敏感）：`--cookie` CLI > `config.json` > `.env` / `ZHIHU_COOKIE` 环境变量。
-- `login.py` 实际做法：打开登录页 → 等 URL 离开 `/signin` → 读 `page.cookies()` → 过滤 `COOKIE_BLACKLIST` 但显式保留 `z_c0`、`SESSIONID`。**`技术方案.md` 里写的 `page.listen.start` 监听方案是旧设计，与现行代码不符——以代码为准。**
+- `config.json`、`.env`、`.browser_profile/` 都已 gitignore，含真实登录令牌。永不提交。
+- Cookie 优先级: `--cookie` CLI > `config.json` > `.env` > `ZHIHU_COOKIE` 环境变量
+- `login.py` 做法：打开登录页 → 等 URL 离开 `/signin` → 读 cookies → 过滤黑名单但显式保留 `z_c0`、`SESSIONID` → 写入 `config.json` → 调用 `/api/v4/me` 验证。**`技术方案.md` 旧设计（page.listen.start）与代码不符。**
 
-## 浏览器 profile
+## 浏览器
 
-`BrowserCrawler` 复用项目内 `.browser_profile/` 持久化登录态；加载失败回退临时 profile。不是缓存，别清。
+- `BrowserCrawler` 默认 visible（`headless=False`），复用 `.browser_profile/` 持久化登录态；启动失败回退临时 profile。不是缓存，别清理。
+- 滚动加载最多 30 轮，连续 2 次高度不变提前退出。
 
-## 输出格式
+## 输出与断点续传
 
-每个问题 → `output/[<qid>] <title>/` 子目录，文件名 `[<voteup>赞] <author> - <title>.md`，带 YAML front matter。`sanitize_filename` 把 `\/:*?"<>|` 替换成 `、`。改命名要同步改 `zhihu_spider.py` 里三个 `save_*_md` 函数。
+- `output/[<qid>] <title>/` 子目录，文件名 `[{voteup}赞] {author} - {title}.md`，带 YAML front matter。
+- `sanitize_filename` 把 `\/:*?"<>|` → `、`。
+- 输出目录自动维护 `.progress.json` 记录已保存 answer_id，支持断点续传。
+- 改命名要同步三个 `save_*_md` 函数。
+
+## 测试
+
+- 纯函数测试，不依赖网络/浏览器。覆盖 parser 标签分支 + sanizite + _write_md + progress 读写。
 
 ## 限速是有意的
 
-API 分页间 `time.sleep(3)`、保存间 `0.5s`、浏览器滚动加载最多 30 轮——都是反爬礼貌，不是性能问题，别优化掉。
+API 分页间 `time.sleep(3)`、保存间 `0.5s`、浏览器滚动 2s/轮——都是反爬礼貌，不是性能问题。
 
-## 依赖与编码
+## 编码
 
-- `pyproject.toml` + `uv.lock`（uv，清华 PyPI 镜像）和 `requirements.txt` 并存，依赖列表手动保持一致。`pip install -r requirements.txt` 和 `uv sync` 都能装运行时依赖；dev 工具（ruff/pytest）用 `uv sync --all-groups` 装。
-- `main.py`、`web_search.py` 都把 stdout 重配为 utf-8，`.bat` 里 `chcp 65001`。`log.py` 的 `setup_logging()` 也做一次（幂等）。编辑时保留，否则中文在 Windows 控制台乱码。
-- `技术方案.md`、`说明.md` 是设计/说明文档，不是可执行真相；和代码冲突时以代码为准。
+- `main.py`、`web_search.py`、`log.py` 都把 stdout 重配为 utf-8。`.bat` 里 `chcp 65001`。编辑时保留，否则中文在 Windows 控制台乱码。
+
+## 文档 v.s. 代码
+
+`技术方案.md`、`说明.md` 是设计/说明文档，与代码冲突时以代码为准。

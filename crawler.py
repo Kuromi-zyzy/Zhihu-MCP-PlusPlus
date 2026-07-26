@@ -8,22 +8,44 @@ import traceback
 import requests
 from bs4 import BeautifulSoup
 
-# ========== API 端点 (requests 方式, 会被知乎反爬拦截) ==========
+from zse_signer import sign_request
+
+# ========== API 端点 ==========
+
+_INCLUDE_ANSWERS = "data[*].voteup_count,content,comment_count,created_time,author.name,author.url_token,question.title,question.id"
+_INCLUDE_ANSWER = "content,voteup_count,comment_count,created_time,author.name,author.url_token,question.title,question.id,thanks_count"
+_INCLUDE_ARTICLE = "content,title,voteup_count,comment_count,created,author.name,author.url_token,image_url,excerpt"
+_INCLUDE_QUESTION = "title,detail,answer_count,follower_count,comment_count,excerpt"
 
 def answers_api(question_id, limit=20, offset=0, sort_by="default"):
     return (
         f"https://www.zhihu.com/api/v4/questions/{question_id}/answers?"
-        f"include=data[*].voteup_count,content&limit={limit}&offset={offset}&sort_by={sort_by}"
+        f"include={_INCLUDE_ANSWERS}&limit={limit}&offset={offset}&sort_by={sort_by}"
     )
 
 def answer_api(answer_id):
-    return f"https://www.zhihu.com/api/v4/answers/{answer_id}?include=data[*].voteup_count,content"
+    return f"https://www.zhihu.com/api/v4/answers/{answer_id}?include={_INCLUDE_ANSWER}"
 
 def article_api(article_id):
-    return f"https://api.zhihu.com/articles/{article_id}"
+    return f"https://www.zhihu.com/api/v4/articles/{article_id}?include={_INCLUDE_ARTICLE}"
 
 def question_info_api(question_id):
-    return f"https://www.zhihu.com/api/v4/questions/{question_id}?include=title"
+    return f"https://www.zhihu.com/api/v4/questions/{question_id}?include={_INCLUDE_QUESTION}"
+
+# ========== Android API 端点（免签名） ==========
+
+ANDROID_HEADERS = {
+    "x-api-version": "3.1.8",
+    "x-app-version": "10.61.0",
+    "x-app-za": "OS=Android&Release=12&Model=sdk_gphone64_arm64&VersionName=10.61.0&VersionCode=26107&Product=com.zhihu.android&Width=1440&Height=2952&Installer=%E7%81%B0%E5%BA%A6&DeviceType=AndroidPhone&Brand=google",
+    "User-Agent": "com.zhihu.android/Futureve/10.61.0 Mozilla/5.0 (Linux; Android 12; sdk_gphone64_arm64 Build/SE1A.220630.001.A1; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/57.0.1000.10 Mobile Safari/537.36",
+}
+
+def android_answers_api(question_id, limit=20, offset=0, sort_by="default"):
+    return (
+        f"https://api.zhihu.com/v4/questions/{question_id}/answers?"
+        f"include={_INCLUDE_ANSWERS}&limit={limit}&offset={offset}&sort_by={sort_by}"
+    )
 
 # ========== requests 方式（备用，可能被 403） ==========
 
@@ -39,24 +61,50 @@ BASE_HEADERS = {
 }
 
 class ZhihuCrawler:
-    def __init__(self, cookie="", proxies=None, timeout=15, retries=3):
+    def __init__(self, cookie="", proxies=None, timeout=15, retries=3, use_signature=True):
         self.session = requests.Session()
         self.session.headers.update(BASE_HEADERS)
         self.session.headers["User-Agent"] = random.choice(UA_POOL)
+        self._dc0 = ""
         if cookie:
             self.session.headers["Cookie"] = cookie
+            self._dc0 = self._parse_dc0(cookie)
         if proxies:
             self.session.proxies.update(proxies)
         self.timeout = timeout
         self.retries = retries
+        self.use_signature = use_signature
 
-    def _request(self, url):
+    @staticmethod
+    def _parse_dc0(cookie_str):
+        for pair in cookie_str.split(";"):
+            pair = pair.strip()
+            if pair.startswith("d_c0="):
+                return pair.split("=", 1)[1]
+        return ""
+
+    def _signed_headers(self, url, body=None):
+        if not self._dc0:
+            return {}
+        sig = sign_request(url, self._dc0, body)
+        return {
+            "x-zse-93": "101_3_3.0",
+            "x-zse-96": sig,
+            "x-requested-with": "fetch",
+        }
+
+    def _request(self, url, use_signed=True):
         for i in range(self.retries):
             try:
-                resp = self.session.get(url, timeout=self.timeout)
+                headers = {}
+                if use_signed and self.use_signature and self._dc0:
+                    headers = self._signed_headers(url)
+                resp = self.session.get(url, timeout=self.timeout, headers=headers)
                 if resp.status_code == 200:
                     return resp
                 if resp.status_code == 403:
+                    if use_signed and self._dc0:
+                        return None
                     return None
                 print(f"[!] HTTP {resp.status_code}")
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
@@ -65,13 +113,41 @@ class ZhihuCrawler:
                 time.sleep(2 * (i + 1))
         return None
 
+    def _try_signed_then_unsigned(self, url):
+        resp = self._request(url, use_signed=True)
+        if resp is not None:
+            return resp
+        if self._dc0:
+            print("  [!] 签名请求被拦截，尝试无签名请求...")
+        return self._request(url, use_signed=False)
+
+    def _android_request(self, url):
+        for i in range(self.retries):
+            try:
+                resp = self.session.get(url, timeout=self.timeout, headers=ANDROID_HEADERS)
+                if resp.status_code == 200:
+                    return resp
+                if resp.status_code == 403:
+                    return None
+                print(f"[!] Android HTTP {resp.status_code}")
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                print(f"[!] Android 请求异常 ({type(e).__name__}): {e}")
+            if i < self.retries - 1:
+                time.sleep(2 * (i + 1))
+        return None
+
     def get_answers(self, question_id, sort_by="default", max_pages=None):
         offset = 0
         page = 0
         all_answers = []
+        use_signed = bool(self._dc0)
         while True:
             url = answers_api(question_id, offset=offset, sort_by=sort_by)
-            resp = self._request(url)
+            resp = self._request(url, use_signed=use_signed)
+            if resp is None and use_signed:
+                print("  [!] 签名请求被拦截，切换无签名请求...")
+                use_signed = False
+                resp = self._request(url, use_signed=False)
             if resp is None:
                 break
             try:
@@ -96,7 +172,7 @@ class ZhihuCrawler:
 
     def get_answer(self, answer_id):
         url = answer_api(answer_id)
-        resp = self._request(url)
+        resp = self._try_signed_then_unsigned(url)
         if resp is None:
             return None
         try:
@@ -106,7 +182,7 @@ class ZhihuCrawler:
 
     def get_article(self, article_id):
         url = article_api(article_id)
-        resp = self._request(url)
+        resp = self._try_signed_then_unsigned(url)
         if resp is None:
             return None
         try:
@@ -116,7 +192,7 @@ class ZhihuCrawler:
 
     def get_question_title(self, question_id):
         url = question_info_api(question_id)
-        resp = self._request(url)
+        resp = self._try_signed_then_unsigned(url)
         if resp is None:
             return None
         try:

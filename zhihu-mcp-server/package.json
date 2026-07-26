@@ -1,0 +1,19 @@
+{
+  "name": "zhihu-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Zhihu API with authentication and signing",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "zhihu-mcp-server": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["mcp", "zhihu", "api"],
+  "author": "",
+  "license": "AGPL-3.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  }
+}

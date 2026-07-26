@@ -19,11 +19,5 @@ __pycache__/
 .idea/
 .vscode/
 
-# Python 缓存
-__pycache__/
-*.pyc
-*.pyo
-
-# IDE
-.idea/
-.vscode/
+# Node (zhihu-mcp-server)
+node_modules/
