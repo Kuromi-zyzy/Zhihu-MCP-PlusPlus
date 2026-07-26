@@ -16,6 +16,9 @@ import time
 
 import requests
 
+# stdout 重配 utf-8，避免 Windows 控制台 GBK 编码报错
+sys.stdout.reconfigure(encoding="utf-8")
+
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 LOGIN_URL = "https://www.zhihu.com/signin?next=%2F"
 
