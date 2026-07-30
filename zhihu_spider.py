@@ -128,6 +128,22 @@ def _crawl_with_fallback(label, target_id, api_attempt, browser_fallback):
     browser_fallback()
 
 
+def _fetch_full_content(crawler, answer_data):
+    """获取回答的完整内容（列表API返回的是截断版，单条API才有全文）"""
+    answer_id = answer_data.get("id", "")
+    if not answer_id:
+        return answer_data
+    try:
+        detail = crawler.get_answer(answer_id)
+        if detail and detail.get("content"):
+            answer_data["content"] = detail["content"]
+        elif detail and detail.get("data", {}).get("content"):
+            answer_data["content"] = detail["data"]["content"]
+    except Exception:
+        pass
+    return answer_data
+
+
 def crawl_question_answers(question_id, output_dir, cookie="", proxies=None, sort_by="default", max_pages=None):
     def api_attempt():
         crawler = ZhihuCrawler(cookie=cookie, proxies=proxies)
@@ -150,6 +166,9 @@ def crawl_question_answers(question_id, output_dir, cookie="", proxies=None, sor
         skipped = len(answers) - len(new_answers)
         print(f"\n共获取 {len(answers)} 条，保存 {len(new_answers)} 条" + (f"（跳过 {skipped} 条已存在）" if skipped else "") + "...\n")
         for ans in new_answers:
+            # 列表API内容截断，补单条详情拿全文
+            print(f"  获取详情: {ans.get('id', '')}...")
+            ans = _fetch_full_content(crawler, ans)
             save_answer_md(ans, save_dir)
             saved_ids.add(str(ans.get("id", "")))
             _save_progress(save_dir, saved_ids)
@@ -314,46 +333,56 @@ def crawl_collection(collection_id, output_dir, cookie="", proxies=None, max_pag
             return False
 
         saved_ids = _load_progress(save_dir)
-        def _item_url(item):
-            return item.get("content", {}).get("url", "")
-        new_items = [it for it in items if _item_url(it) not in saved_ids]
+        def _item_id(item):
+            c = item.get("content", {})
+            url = c.get("url", "")
+            if "/p/" in url:
+                return f"article:{url.split('/p/')[-1].split('?')[0]}"
+            if "/answer/" in url:
+                return f"answer:{url.split('/answer/')[-1].split('?')[0]}"
+            return url
+        new_items = [it for it in items if _item_id(it) not in saved_ids]
         skipped = len(items) - len(new_items)
 
-        print(f"\n共获取 {len(items)} 条，保存 {len(new_items)} 条" +
+        print(f"\n共获取 {len(items)} 条，下载 {len(new_items)} 条" +
               (f"（跳过 {skipped} 条已存在）" if skipped else "") + "...\n")
         for item in new_items:
             c = item.get("content", {})
-            item_url = _item_url(item)
+            item_url = c.get("url", "")
             item_type = c.get("type", "unknown")
-            title = c.get("title", "") or (c.get("question", {}) or {}).get("title", "")
-            author = c.get("author", {})
-            author_name = author.get("name", "") if isinstance(author, dict) else ""
-            voteup = c.get("voteup_count", 0)
 
-            front_matter = {
-                "title": title,
-                "author": author_name,
-                "type": item_type,
-                "voteup": voteup,
-                "url": item_url,
-            }
-            excerpt = c.get("excerpt_title", "") or c.get("excerpt", "")
-            item_id = ""
-            if "/p/" in item_url:
-                item_id = item_url.split("/p/")[-1].split("?")[0]
-                front_matter["article_id"] = item_id
+            # 获取全文
+            full_data = None
+            if item_type == "article" and "/p/" in item_url:
+                aid = item_url.split("/p/")[-1].split("?")[0]
+                full_data = crawler.get_article(aid)
             elif "/answer/" in item_url:
-                item_id = item_url.split("/answer/")[-1].split("?")[0]
-                front_matter["answer_id"] = item_id
+                aid = item_url.split("/answer/")[-1].split("?")[0]
+                full_data = crawler.get_answer(aid)
 
-            filename = sanitize_filename(f"{author_name} - {title}.md" if title else f"{item_type}_{item_id}.md")
-            filepath = os.path.join(save_dir, filename)
-            _write_md(filepath, front_matter, excerpt)
-            print(f"  ✓ {filename}")
+            if full_data:
+                if item_type == "article":
+                    save_article_md(full_data, save_dir)
+                else:
+                    save_answer_md(full_data, save_dir)
+            else:
+                # 兜底：存摘要
+                title = c.get("title", "") or (c.get("question", {}) or {}).get("title", "")
+                author = c.get("author", {})
+                author_name = author.get("name", "") if isinstance(author, dict) else ""
+                voteup = c.get("voteup_count", 0)
+                excerpt = c.get("excerpt_title", "") or c.get("excerpt", "")
+                filename = sanitize_filename(f"{author_name} - {title}.md" if title else "item.md")
+                filepath = os.path.join(save_dir, filename)
+                _write_md(filepath, {
+                    "title": title, "author": author_name,
+                    "voteup": voteup, "url": item_url,
+                }, excerpt)
+                print(f"  ✓ {filename}（摘要）")
 
-            saved_ids.add(item_url)
+            saved_ids.add(_item_id(item))
             _save_progress(save_dir, saved_ids)
-            time.sleep(0.3)
+            time.sleep(0.5)
 
         print(f"\n完成！共保存 {len(new_items)} 条收藏到: {save_dir}")
         return True
