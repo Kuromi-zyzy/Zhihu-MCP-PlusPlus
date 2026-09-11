@@ -67,7 +67,7 @@ python main.py question 320078376 --max-pages 5  # 限制抓取页数
 
 ## MCP 服务器
 
-目录 `zhihu-mcp-server/` 内置知乎 MCP 服务（10 个工具），接入 opencode/Claude 后可在 AI 对话中实时查知乎：
+目录 `zhihu-mcp-server/` 内置知乎 MCP 服务（14 个工具 = 10 个查询 + 4 个保存），接入 ZCode/opencode/Claude 后可在 AI 对话中实时查知乎：
 
 ```
 zhihu_hot_list       — 热榜
@@ -80,7 +80,13 @@ zhihu_question_answers — 回答列表
 zhihu_get_user       — 用户信息
 zhihu_set_cookies    — 设置 Cookie
 zhihu_get_config     — 查看配置
+zhihu_save_question  — 保存问题全部回答（调本爬虫）
+zhihu_save_answer    — 保存单条回答（调本爬虫）
+zhihu_save_article   — 保存专栏文章（调本爬虫）
+zhihu_save_collection — 保存收藏夹（调本爬虫）
 ```
+
+> 部署注意（2026-09-08）：save_* 四工具经 `SPIDER_DIR=..` 调用本爬虫，只有 MCP 代码住在 `zhihu-mcp-server/` 原生位置时路径才成立。Windows 侧 ZCode 指回 `D:\Tools\zhihuspider\zhihu-mcp-server\index.js` 可用全部 14 个工具；WSL 侧副本 `/home/tang/zhihu-mcp/` 仅 10 个查询工具可用（save_* 断链）。爬虫登录态（config.json/.env）与 MCP 的 `~/.zhihu-mcp` cookies 互相独立。
 
 ## Cookie
 
