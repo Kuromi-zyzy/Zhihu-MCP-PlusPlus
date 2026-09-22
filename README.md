@@ -2,7 +2,7 @@
 
 <p align="left">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
-  <img alt="Node" src="https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white">
+  <img alt="Node" src="https://img.shields.io/badge/Node.js-22.5%2B-339933?logo=node.js&logoColor=white">
   <img alt="MCP" src="https://img.shields.io/badge/tools-27-8A2BE2">
   <img alt="CI" src="https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=githubactions&logoColor=white">
 </p>
@@ -28,7 +28,7 @@ Discovery（多源检索）──► Retrieval（统一内容读取）──► 
 git clone https://github.com/Kuromi-zyzy/Zhihu-MCP-PlusPlus.git
 cd Zhihu-MCP-PlusPlus
 pip install -r requirements.txt          # Python 爬虫侧
-cd zhihu-mcp-server && npm ci             # MCP 侧（Node ≥ 18）
+cd zhihu-mcp-server && npm ci             # MCP 侧（Node ≥ 22.5，node:sqlite 内置）
 ```
 
 登录（验证通过才写凭据）：
