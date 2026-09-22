@@ -16,7 +16,8 @@
 
 - **三层递进**: `ZhihuCrawler` 现在有三层反爬策略——带签名 requests（zse96 v2）→ Android API 通道 → `BrowserCrawler` 浏览器兜底。遇 403 自动降级。
 - **`zse_signer.py`**: 从 zhihu-plus-plus 移植的 zse96 v2 签名算法，`sign_request(url, d_c0)` → `2.0_[signature]`。ZhihuCrawler 有 d_c0 时自动签名。
-- **`zhihu-mcp-server/`**: Node.js MCP 服务（来自 iteng007/zhihu-mcp-server），14 个工具 = 10 个纯 HTTP 查询 + 4 个 save_*（内部 `execSync('python main.py ...', cwd=SPIDER_DIR)`，`SPIDER_DIR=path.resolve(__dirname,'..')` 指向本项目根）。部署双端：WSL 副本 `/home/tang/zhihu-mcp/` 的相对路径指不回本项目 → save_* 断链；Windows 侧 ZCode 2026-09-08 起指回本原生位置 → save_* 仅 Windows 侧可用（Windows Python314 已装全依赖）。爬虫登录态走 config.json/.env（login.py），与 MCP 的 `~/.zhihu-mcp` cookies 互相独立。
+- **`zhihu-mcp-server/`**: Node.js MCP 服务（来自 iteng007/zhihu-mcp-server），15 个工具 = 11 个查询 + 4 个 save_*（内部 `execSync('python main.py ...', cwd=SPIDER_DIR)`，`SPIDER_DIR=path.resolve(__dirname,'..')` 指向本项目根）。部署双端：WSL 副本 `/home/tang/zhihu-mcp/` 的相对路径指不回本项目 → save_* 断链；Windows 侧 ZCode 2026-09-08 起指回本原生位置 → save_* 仅 Windows 侧可用（Windows Python314 已装全依赖）。爬虫登录态走 config.json/.env（login.py），与 MCP 的 `~/.zhihu-mcp` cookies 互相独立。
+- **`zhihu_search_web`（Bing 信源）**: 纯 fetch + 正则解析 `cn.bing.com` HTML（无新依赖）。已知边界：① cn.bing.com 对中文多词查询会**静默丢弃 site:** 限制，结果必须按 `zhihu.com` 域名硬过滤（`classifyZhihuUrl`）；② DDG 大陆直连超时，无引擎回退；③ `classifyZhihuUrl` 识别 question/answer/pin/article/tardis 镜像页/user/collection，tardis 映射回 `zhuanlan.zhihu.com/p/<id>`。
 - **模块全在根目录**: `crawler.py`、`parser.py`、`zse_signer.py`、`zhihu_spider.py`、`login.py`。`util/` 和 `zhihu/` 都是空脚手架，无代码引用。
 - **`web_search.py` 是独立工具**（DuckDuckGo/Bing 搜索），有自己的 CLI 和 `main()`，不被爬虫导入。改爬虫别动它。
 
