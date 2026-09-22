@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -r requirements.txt ruff
+        run: pip install -r requirements.txt ruff pytest
       - name: Lint (ruff)
         run: ruff check .
       - name: Test (pytest)
@@ -42,9 +42,7 @@ jobs:
         run: npm ci
       - name: Syntax check (all modules)
         run: |
-          for f in index.js auth.js bing-search.js cache.js credentials.js errors.js logger.js \
-                   rate-limiter.js storage.js transport.js content-service.js url-resolver.js \
-                   search/bing.js search/router.js; do node --check "$f"; done
+          for f in *.js search/*.js; do node --check "$f"; done
       - name: Test (node --test)
         run: npm test
       - name: Smoke test (no account required)
