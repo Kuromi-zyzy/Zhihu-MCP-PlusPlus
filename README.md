@@ -1,6 +1,8 @@
-# ZhihuSpider
+# 知乎 MCP++
 
-知乎内容爬虫，支持 API 签名鉴权 + 浏览器兜底，批量保存为 Markdown 文件。
+> 原名 `ZhihuSpider`，2026-09-22 更名为「知乎 MCP++」（GitHub 仓库名：`Zhihu-MCP-PlusPlus`）。
+
+知乎内容爬虫 + MCP 服务器，支持 API 签名鉴权 + 浏览器兜底，批量保存为 Markdown 文件。
 
 ## 功能
 
@@ -104,3 +106,15 @@ output/[<id>] <title>/
 
 - 请求间隔 3 秒，反爬礼貌，不是性能问题
 - 仅用于个人学习和研究
+
+## 致谢
+
+本项目由两位原作者的工作结合发展而来：
+
+- **Milloyy** — ZhihuSpider 原始作者，2019 年完成最初实现。原仓库与账号现已不可访问，谨以 git 历史留此致谢。
+- **[Foxgeek36 (Decimal)](https://github.com/Foxgeek36)** — 在 Milloyy 版本基础上维护并扩展，本仓库 fork 自 `Foxgeek36/ZhihuSpider`，将两者结合后继续开发至今。
+
+另外感谢：
+
+- [zly2006/zhihu-plus-plus](https://github.com/zly2006/zhihu-plus-plus) — `zse_signer.py` 的 zse96 v2 签名算法移植来源
+- [meurz/zhihu-mcp-server](https://github.com/meurz/zhihu-mcp-server)（原名 `iteng007/zhihu-mcp-server`）— `zhihu-mcp-server/` 的上游项目
