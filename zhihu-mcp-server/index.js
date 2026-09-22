@@ -12,11 +12,12 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { signRequest } from './zse-signer.js';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
+import { bingSearchZhihu, classifyZhihuUrl, ZHIHU_NEXT_TOOLS } from './bing-search.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -127,94 +128,49 @@ async function zhihuRequest(url, options = {}) {
   return await response.json();
 }
 
-// ================= Bing web search (zhihu_search_web, 2026-09-22) =================
-// cn.bing.com 对中文多词查询会静默丢弃 site: 限制（实测），结果必须按域名硬过滤；
-// DDG 大陆直连不可达，不做回退。纯 fetch + 正则解析，无新依赖。
-const BING_UA_POOL = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
-];
-
-function decodeHtmlEntities(s) {
-  return s
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ');
-}
-
-function unwrapBingHref(h) {
-  let url = h.replace(/&amp;/g, '&');
-  if (url.startsWith('/')) url = 'https://cn.bing.com' + url;
-  // bing 偶发 /ck/a?...&u=a1<base64url> 跳转包装
-  const m = url.match(/[?&]u=a1([\w-]+)/);
-  if (m) {
-    try { return Buffer.from(m[1], 'base64url').toString('utf8'); } catch { /* keep url */ }
+// ============ save_* 入参校验与安全执行（防命令注入） ============
+// 历史上这里用 execSync 拼 shell 字符串，参数可注入任意命令；现改为
+// 白名单校验 + execFileSync 数组传参，参数不经过 shell。
+function requireValidId(value, name) {
+  const s = String(value ?? '').trim();
+  if (!/^\d{3,32}$/.test(s)) {
+    throw new Error(`参数 ${name} 必须是纯数字 ID（收到: ${JSON.stringify(String(value)).slice(0, 40)}）`);
   }
-  return url;
+  return s;
 }
 
-// 从知乎 URL 提取内容类型与 ID
-function classifyZhihuUrl(url) {
+function requireEnum(value, name, allowed, fallback) {
+  const s = String(value ?? fallback);
+  if (!allowed.includes(s)) {
+    throw new Error(`参数 ${name} 只能是 ${allowed.join('/')}（收到: ${JSON.stringify(s).slice(0, 40)}）`);
+  }
+  return s;
+}
+
+function requireOptionalInt(value, name, { min = 1, max = 1000 } = {}) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw new Error(`参数 ${name} 必须是 ${min}-${max} 的整数（收到: ${JSON.stringify(String(value)).slice(0, 40)}）`);
+  }
+  return n;
+}
+
+function runSpider(spiderArgs, timeoutMs) {
   try {
-    const u = new URL(url);
-    if (!/(^|\.)zhihu\.com$/.test(u.hostname)) return null;
-    let m = u.pathname.match(/\/question\/(\d+)(?:\/answer\/(\d+))?/);
-    if (m) {
-      return m[2]
-        ? { type: 'answer', id: m[2], question_id: m[1] }
-        : { type: 'question', id: m[1] };
-    }
-    m = u.pathname.match(/\/pin\/(\d+)/);
-    if (m) return { type: 'pin', id: m[1] };
-    // tardis/bd、tardis/zm 是知乎给搜索引擎的文章镜像页，数字 ID 与专栏文章一致
-    m = u.pathname.match(/\/tardis\/(?:bd|zm)\/art\/(\d+)/);
-    if (m) return { type: 'article', id: m[1], canonical_url: `https://zhuanlan.zhihu.com/p/${m[1]}` };
-    m = u.pathname.match(/\/p\/(\d+)/);
-    if (m && u.hostname === 'zhuanlan.zhihu.com') return { type: 'article', id: m[1] };
-    m = u.pathname.match(/\/people\/([^/]+)/);
-    if (m) return { type: 'user', id: decodeURIComponent(m[1]) };
-    m = u.pathname.match(/\/collection\/(\d+)/);
-    if (m) return { type: 'collection', id: m[1] };
-    return { type: 'other', id: null };
-  } catch {
-    return null;
-  }
-}
-
-async function bingSearchZhihu(query, limit) {
-  const q = /site:[^\s]*zhihu/i.test(query) ? query : `site:zhihu.com ${query}`;
-  const url = `https://cn.bing.com/search?q=${encodeURIComponent(q)}&setlang=zh-CN&count=${Math.min(limit * 3, 30)}`;
-  await new Promise(r => setTimeout(r, 300 + Math.floor(Math.random() * 700)));
-  const resp = await fetch(url, {
-    headers: {
-      'User-Agent': BING_UA_POOL[Math.floor(Math.random() * BING_UA_POOL.length)],
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-      'Referer': 'https://cn.bing.com/'
-    }
-  });
-  if (!resp.ok) {
-    throw new Error(`bing HTTP ${resp.status}: ${resp.statusText}`);
-  }
-  const html = await resp.text();
-  const chunks = html.split(/<li class="b_algo[ "]/).slice(1);
-  const raw = [];
-  for (const c of chunks) {
-    const hrefM = c.match(/<h2[^>]*>\s*<a[^>]*href="([^"]+)"/);
-    if (!hrefM) continue;
-    const titleM = c.match(/<h2[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/);
-    const snipM = c.match(/<p[^>]*>([\s\S]*?)<\/p>/);
-    raw.push({
-      title: decodeHtmlEntities((titleM ? titleM[1] : '').replace(/<[^>]*>/g, '')).trim(),
-      url: unwrapBingHref(hrefM[1]),
-      snippet: decodeHtmlEntities((snipM ? snipM[1] : '').replace(/<[^>]*>/g, '')).trim().slice(0, 300)
+    return execFileSync('python', ['main.py', ...spiderArgs], {
+      cwd: SPIDER_DIR,
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      windowsHide: true
     });
+  } catch (e) {
+    // 超时/非零退出时把爬虫自己的输出带回给调用方，便于定位
+    const stdout = typeof e.stdout === 'string' ? e.stdout : '';
+    const stderr = typeof e.stderr === 'string' ? e.stderr : '';
+    const detail = (stdout + '\n' + stderr).trim();
+    throw new Error(`爬虫执行失败（${e.signal || e.status || e.code || 'unknown'}）${detail ? ':\n' + detail.slice(-1500) : ''}`);
   }
-  return raw;
 }
 
 // Create MCP server
@@ -676,7 +632,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         for (const r of raw) {
           const info = classifyZhihuUrl(r.url);
           if (!info) continue;
-          results.push({ title: r.title, url: r.url, snippet: r.snippet, zhihu: info });
+          results.push({
+            title: r.title,
+            url: r.url,
+            snippet: r.snippet,
+            zhihu: { ...info, next_tools: ZHIHU_NEXT_TOOLS[info.type] || [] }
+          });
           if (results.length >= max) break;
         }
         return {
@@ -696,31 +657,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'zhihu_save_question': {
         const { question_id, max_pages, sort } = args;
-        let cmd = `python main.py question ${question_id}`;
-        if (sort) cmd += ` --sort ${sort}`;
-        if (max_pages) cmd += ` --max-pages ${max_pages}`;
-        const output = execSync(cmd, { cwd: SPIDER_DIR, encoding: 'utf8', timeout: 120000 });
-        return { content: [{ type: 'text', text: output }] };
+        const qid = requireValidId(question_id, 'question_id');
+        const spiderArgs = ['question', qid, '--sort', requireEnum(sort, 'sort', ['default', 'voteups', 'created'], 'default')];
+        const pages = requireOptionalInt(max_pages, 'max_pages', { min: 1, max: 500 });
+        if (pages !== undefined) spiderArgs.push('--max-pages', String(pages));
+        return { content: [{ type: 'text', text: runSpider(spiderArgs, 120000) }] };
       }
 
       case 'zhihu_save_answer': {
-        const cmd = `python main.py answer ${args.answer_id}`;
-        const output = execSync(cmd, { cwd: SPIDER_DIR, encoding: 'utf8', timeout: 60000 });
-        return { content: [{ type: 'text', text: output }] };
+        const aid = requireValidId(args.answer_id, 'answer_id');
+        return { content: [{ type: 'text', text: runSpider(['answer', aid], 60000) }] };
       }
 
       case 'zhihu_save_article': {
-        const cmd = `python main.py article ${args.article_id}`;
-        const output = execSync(cmd, { cwd: SPIDER_DIR, encoding: 'utf8', timeout: 60000 });
-        return { content: [{ type: 'text', text: output }] };
+        const artid = requireValidId(args.article_id, 'article_id');
+        return { content: [{ type: 'text', text: runSpider(['article', artid], 60000) }] };
       }
 
       case 'zhihu_save_collection': {
-        const { collection_id, max_pages } = args;
-        let cmd = `python main.py collection ${collection_id}`;
-        if (max_pages) cmd += ` --max-pages ${max_pages}`;
-        const output = execSync(cmd, { cwd: SPIDER_DIR, encoding: 'utf8', timeout: 180000 });
-        return { content: [{ type: 'text', text: output }] };
+        const cid = requireValidId(args.collection_id, 'collection_id');
+        const spiderArgs = ['collection', cid];
+        const pages = requireOptionalInt(args.max_pages, 'max_pages', { min: 1, max: 500 });
+        if (pages !== undefined) spiderArgs.push('--max-pages', String(pages));
+        return { content: [{ type: 'text', text: runSpider(spiderArgs, 180000) }] };
       }
 
       default:

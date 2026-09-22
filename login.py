@@ -7,6 +7,11 @@ login.py -- 自动打开浏览器登录知乎，捕获 Cookie
 
 依赖:
     DrissionPage (pip install DrissionPage)
+
+判定逻辑（2026-09-22 加固，回流自用户目录 qr_login.py）:
+    不再以「URL 离开 /signin」判定登录——知乎登录页自身重定向会误触发，
+    导致未扫码就抓到匿名 Cookie。改为轮询 Cookie 出现登录令牌 z_c0 为准，
+    且 /api/v4/me 验证通过后才写入 config.json（验证失败不落盘）。
 """
 
 import json
@@ -21,6 +26,8 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 LOGIN_URL = "https://www.zhihu.com/signin?next=%2F"
+HOME_URL = "https://www.zhihu.com/"
+WAIT_ZC0_SECONDS = 240  # 扫码窗口
 
 _ChromiumPage = None
 
@@ -41,6 +48,7 @@ COOKIE_BLACKLIST = [
     "tgw_l7_", "_xsrf", "HMACCOUNT", "Hm_lvt_", "Hm_lpvt_",
     "trc_cookie_storage", "KLBRSID",
 ]
+BLACKLIST_EXACT = {"BEC"}
 
 
 def load_config() -> dict:
@@ -60,6 +68,8 @@ def save_config(config: dict):
 
 
 def is_useful_cookie(name: str) -> bool:
+    if name in BLACKLIST_EXACT:
+        return False
     for black in COOKIE_BLACKLIST:
         if name.startswith(black):
             return False
@@ -67,22 +77,32 @@ def is_useful_cookie(name: str) -> bool:
 
 
 def capture_cookie(headless: bool = False) -> str:
+    """打开登录页，轮询 z_c0 出现才算登录成功，返回含 z_c0 的 Cookie 串（否则为空）。"""
     ChromiumPage = _get_browser()
     page = ChromiumPage()
     cookie_str = ""
 
     try:
         print("\n  → 正在打开知乎登录页...")
-        print("  → 请用微信/QQ/手机号登录（120 秒超时）")
+        print(f"  → 请用微信/QQ/手机号登录（{WAIT_ZC0_SECONDS} 秒超时）")
         page.get(LOGIN_URL)
 
-        # 等待 URL 离开 /signin，说明登录成功
-        page.wait.url_change(LOGIN_URL, timeout=120)
-        time.sleep(3)
+        # 轮询 Cookie 出现 z_c0 为准，不看 URL（URL 判定会被登录页自身重定向误触发）
+        deadline = time.time() + WAIT_ZC0_SECONDS
+        zc0_seen = False
+        while time.time() < deadline:
+            names = {c.get("name", "") for c in page.cookies()}
+            if "z_c0" in names:
+                zc0_seen = True
+                break
+            time.sleep(2)
 
-        # 登录成功后再跳转到首页，确保所有 Cookie 都刷新
-        print("  → 登录成功！正在获取 Cookie...")
-        page.get("https://www.zhihu.com/")
+        if not zc0_seen:
+            print("  ✗ 超时未捕获到 z_c0（未扫码或扫码未确认）")
+            return ""
+
+        print("  → 检测到 z_c0，跳转首页刷新 Cookie...")
+        page.get(HOME_URL)
         time.sleep(3)
 
         # 从浏览器获取全部 Cookie
@@ -100,13 +120,9 @@ def capture_cookie(headless: bool = False) -> str:
         if cookie_str:
             print(f"  ✓ Cookie 捕获成功！({len(pairs)} 项)")
             print(f"  📋 预览: {cookie_str[:50]}...")
-            # 检查关键 Cookie 是否存在
-            has_zco = any("z_c0" in p for p in pairs)
-            has_session = any("SESSIONID" in p for p in pairs)
-            if has_zco:
-                print("  ✓ 关键 Cookie 'z_c0' 已捕获")
-            if has_session:
-                print("  ✓ 关键 Cookie 'SESSIONID' 已捕获")
+            if "z_c0" not in cookie_str:
+                print("  ✗ 捕获结果异常（无 z_c0），视为未登录")
+                cookie_str = ""
         else:
             print("  ✗ 未捕获到有效 Cookie")
 
@@ -147,15 +163,20 @@ def main(headless: bool = False):
     while True:
         cookie = capture_cookie(headless=headless)
         if cookie:
+            # 先验证，验证通过才写 config.json（避免无效 Cookie 覆盖旧有效值）
+            print("\n  → 正在验证 Cookie 有效性...")
+            ok, info = validate_cookie(cookie)
+            if not ok:
+                print(f"  ✗ Cookie 验证失败: {info}，不写入 config.json")
+                again = input("  重新登录？(y/n): ").strip().lower()
+                if again != "y":
+                    print("  已取消（原 config.json 未改动）")
+                    break
+                continue
+            print(f"  ✓ Cookie 有效！登录用户: {info}")
             config = load_config()
             config["cookie"] = cookie
             save_config(config)
-            print("\n  → 正在验证 Cookie 有效性...")
-            ok, info = validate_cookie(cookie)
-            if ok:
-                print(f"  ✓ Cookie 有效！登录用户: {info}")
-            else:
-                print(f"  ⚠ Cookie 可能无效: {info}")
             print("\n  💡 现在可以运行爬虫了:")
             print("      python main.py question <问题ID>")
             print("      python main.py article  <文章ID>")

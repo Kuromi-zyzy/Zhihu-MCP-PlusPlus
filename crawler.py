@@ -168,13 +168,24 @@ class ZhihuCrawler:
         page = 0
         all_answers = []
         use_signed = bool(self._dc0)
+        used_android = False
         while True:
-            url = answers_api(question_id, offset=offset, sort_by=sort_by)
-            resp = self._request(url, use_signed=use_signed)
-            if resp is None and use_signed:
-                print("  [!] 签名请求被拦截，切换无签名请求...")
-                use_signed = False
-                resp = self._request(url, use_signed=False)
+            if used_android:
+                url = android_answers_api(question_id, offset=offset, sort_by=sort_by)
+                resp = self._android_request(url)
+            else:
+                url = answers_api(question_id, offset=offset, sort_by=sort_by)
+                resp = self._request(url, use_signed=use_signed)
+                if resp is None and use_signed:
+                    print("  [!] 签名请求被拦截，切换无签名请求...")
+                    use_signed = False
+                    resp = self._request(url, use_signed=False)
+            if resp is None and not used_android:
+                # 第三层：Android API 通道（无需签名的独立接口）
+                print("  [!] Web API 被拦截，切换 Android API 通道...")
+                used_android = True
+                url = android_answers_api(question_id, offset=offset, sort_by=sort_by)
+                resp = self._android_request(url)
             if resp is None:
                 break
             try:

@@ -123,7 +123,7 @@ zhihu_save_collection — 保存收藏夹（调本爬虫）
 ### 双搜索信源说明
 
 - `zhihu_search`（站内）：头部热答质量高、带点赞数，但长尾覆盖弱，结果混 `ai_zhida` 推广位
-- `zhihu_search_web`（Bing）：能检索到站内搜不到的专栏长文；实测 Bing 对中文多词查询会静默放宽 `site:` 限制，本工具已按 `zhihu.com` 域名硬过滤，并在结果中标注知乎类型（question/answer/article/pin/user/collection）与 ID，可直接喂给 `zhihu_get_answer` / `zhihu_save_article` 等；劣化查询可能返回 0 条（宁缺毋滥）
+- `zhihu_search_web`（Bing）：能检索到站内搜不到的专栏长文；实测 Bing 对中文多词查询会静默放宽 `site:` 限制，本工具已按 `zhihu.com` 域名硬过滤，并在结果中标注知乎类型与 ID 及对应的 `next_tools`（可直接调用的后续工具名）；劣化查询可能返回 0 条（宁缺毋滥）。pin（想法）类型目前没有专用工具，需从所属问题入手
 
 ### AI 助手一键接入
 
@@ -151,7 +151,7 @@ npx -y supergateway --stdio "node /absolute/path/to/Zhihu-MCP-PlusPlus/zhihu-mcp
 
 **给 AI 助手的阅读提示**（可直接作为 system prompt / workspace 上下文）：
 
-> 本仓库提供 15 个知乎 MCP 工具。查内容：`zhihu_search`（站内，热答带点赞）或 `zhihu_search_web`（Bing 信源，长尾文章更全，返回结果带 `zhihu.type` 与 `zhihu.id`）；看详情：`zhihu_get_question / zhihu_get_answer / zhihu_get_article`，参数直接用上一步拿到的 id；存档：`zhihu_save_question / zhihu_save_answer / zhihu_save_article / zhihu_save_collection` 输出 Markdown 到 `output/`。所有请求自带 zse96 v2 签名，仅需 cookie 中有 `d_c0`（用 `zhihu_set_cookies` 写入）；请求间隔 3 秒属反爬礼貌，请勿并发轰炸。
+> 本仓库提供 15 个知乎 MCP 工具。查内容：`zhihu_search`（站内，热答带点赞）或 `zhihu_search_web`（Bing 信源，不依赖知乎 Cookie，返回结果带 `zhihu.type` / `zhihu.id` / `zhihu.next_tools`）；看详情：`zhihu_get_question / zhihu_get_answer / zhihu_get_article`，参数直接用上一步拿到的 id；存档：`zhihu_save_question / zhihu_save_answer / zhihu_save_article / zhihu_save_collection` 输出 Markdown 到 `output/`。知乎 Web API 类工具（search/get_*）需要 cookie 中有 `d_c0` 做 zse96 v2 签名（用 `zhihu_set_cookies` 写入）；`zhihu_hot_list` 走 Android API、`zhihu_search_web` 走 Bing，无 Cookie 也可用。请求间隔 3 秒属反爬礼貌，请勿并发轰炸。
 
 ## Cookie
 
@@ -169,15 +169,17 @@ output/[<id>] <title>/
 
 ```
 ├── main.py               # CLI 入口：question / answer / article / collection / login
-├── crawler.py            # ZhihuCrawler（签名 API）+ BrowserCrawler（浏览器兜底）
+├── crawler.py            # ZhihuCrawler（签名→无签名→Android API 三层递进）+ BrowserCrawler（浏览器兜底）
 ├── zse_signer.py         # zse96 v2 签名
 ├── parser.py             # HTML → Markdown + YAML front matter
 ├── zhihu_spider.py       # 业务编排、断点续传、文件保存
-├── login.py              # DrissionPage 扫码登录、Cookie 捕获
+├── login.py              # DrissionPage 扫码登录、Cookie 捕获（轮询 z_c0 + 验证后写盘）
 ├── web_search.py         # 独立的 Bing/DuckDuckGo 搜索小工具（不被爬虫引用）
-├── zhihu-mcp-server/     # Node.js MCP 服务器（15 工具）
+├── zhihu-mcp-server/     # Node.js MCP 服务器（15 工具，含 Bing 检索模块与回归测试）
 └── tests/                # pytest 纯函数测试（python -m pytest）
 ```
+
+CI：GitHub Actions 双矩阵（`ruff + pytest` / `node --check + npm test`），每次 push 自动执行。
 
 ## 免责声明
 

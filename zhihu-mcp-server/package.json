@@ -8,7 +8,8 @@
     "zhihu-mcp-server": "./index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test \"test/*.test.js\""
   },
   "keywords": ["mcp", "zhihu", "api"],
   "author": "",
