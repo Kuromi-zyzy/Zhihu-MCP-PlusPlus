@@ -125,6 +125,34 @@ zhihu_save_collection — 保存收藏夹（调本爬虫）
 - `zhihu_search`（站内）：头部热答质量高、带点赞数，但长尾覆盖弱，结果混 `ai_zhida` 推广位
 - `zhihu_search_web`（Bing）：能检索到站内搜不到的专栏长文；实测 Bing 对中文多词查询会静默放宽 `site:` 限制，本工具已按 `zhihu.com` 域名硬过滤，并在结果中标注知乎类型（question/answer/article/pin/user/collection）与 ID，可直接喂给 `zhihu_get_answer` / `zhihu_save_article` 等；劣化查询可能返回 0 条（宁缺毋滥）
 
+### AI 助手一键接入
+
+把下面这段放进 MCP 客户端的配置文件即可（Claude Desktop 的 `claude_desktop_config.json`、Cursor 的 `mcp.json`、Cline 等同理）：
+
+```json
+{
+  "mcpServers": {
+    "zhihu": {
+      "command": "node",
+      "args": ["/absolute/path/to/Zhihu-MCP-PlusPlus/zhihu-mcp-server/index.js"],
+      "env": {}
+    }
+  }
+}
+```
+
+客户端只支持远程 HTTP 方式时，用 supergateway 桥接（任选端口）：
+
+```bash
+npx -y supergateway --stdio "node /absolute/path/to/Zhihu-MCP-PlusPlus/zhihu-mcp-server/index.js" \
+  --outputTransport streamableHttp --port 8635 --healthEndpoint /healthz
+# 客户端填 http://127.0.0.1:8635/mcp
+```
+
+**给 AI 助手的阅读提示**（可直接作为 system prompt / workspace 上下文）：
+
+> 本仓库提供 15 个知乎 MCP 工具。查内容：`zhihu_search`（站内，热答带点赞）或 `zhihu_search_web`（Bing 信源，长尾文章更全，返回结果带 `zhihu.type` 与 `zhihu.id`）；看详情：`zhihu_get_question / zhihu_get_answer / zhihu_get_article`，参数直接用上一步拿到的 id；存档：`zhihu_save_question / zhihu_save_answer / zhihu_save_article / zhihu_save_collection` 输出 Markdown 到 `output/`。所有请求自带 zse96 v2 签名，仅需 cookie 中有 `d_c0`（用 `zhihu_set_cookies` 写入）；请求间隔 3 秒属反爬礼貌，请勿并发轰炸。
+
 ## Cookie
 
 优先级：`--cookie` 命令行 > `config.json`（login.py 生成） > `.env` > `ZHIHU_COOKIE` 环境变量
