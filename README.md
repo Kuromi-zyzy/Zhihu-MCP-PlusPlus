@@ -1,35 +1,48 @@
 # 知乎 MCP++
 
-> 原名 `ZhihuSpider`，2026-09-22 更名为「知乎 MCP++」（GitHub 仓库名：`Zhihu-MCP-PlusPlus`）。
+<p align="left">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white">
+  <img alt="Node" src="https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white">
+  <img alt="MCP" src="https://img.shields.io/badge/MCP-15%20tools-8A2BE2">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue">
+</p>
 
-知乎内容爬虫 + MCP 服务器，支持 API 签名鉴权 + 浏览器兜底，批量保存为 Markdown 文件。
+> 前身 `ZhihuSpider`，2026-09-22 更名为「知乎 MCP++」。**致谢两位原作者**：[Milloyy](https://github.com/Milloyy)（2019 年原始实现）与 [Foxgeek36 (Decimal)](https://github.com/Foxgeek36)（fork 来源），本项目由两者结合发展而来，详见文末「致谢」。
 
-## 功能
+知乎内容爬虫 + MCP 服务器：zse96 v2 API 签名 → Android API → 浏览器兜底三层反爬策略，批量保存为 Markdown；同时以 MCP（Model Context Protocol）服务器的形式把 15 个工具暴露给 Claude / Cursor / 豆包等 AI 助手，在对话中实时查知乎。
 
-- 爬取问题下的回答（支持排序、分页、断点续传）
-- 爬取单篇回答、专栏文章
-- **爬取收藏夹（收藏夹 → Markdown）**
-- **三层反爬策略**：zse96 v2 签名 → Android API 通道 → 浏览器兜底
-- 自动 Cookie 捕获（DrissionPage 控制浏览器登录）
-- 支持代理、元数据保存（YAML front matter）
-- 内置 MCP 服务器，AI 助手可实时查知乎
+## 功能一览
+
+**Python 爬虫（CLI）**
+- 爬取问题下的回答（排序、分页、断点续传）、单篇回答、专栏文章、收藏夹
+- 三层递进反爬：`zse96 v2 签名 requests → Android API → DrissionPage 浏览器兜底`，遇 403 自动降级
+- 自动 Cookie 捕获（控制浏览器扫码登录）、支持代理、YAML front matter 元数据
+
+**MCP 服务器（`zhihu-mcp-server/`，Node.js）**
+- 15 个工具 = 11 个查询 + 4 个本地保存，接入任意支持 MCP 的 AI 客户端
+- 双搜索信源：知乎站内搜索（头部热答、带点赞数）+ **Bing `site:zhihu.com` 检索**（长尾专栏文章覆盖更好），Bing 结果自动过滤站外噪音并提取知乎 ID，可直接串联 `zhihu_save_*` 存档
 
 ## 安装
 
 ```bash
+git clone https://github.com/Kuromi-zyzy/Zhihu-MCP-PlusPlus.git
+cd Zhihu-MCP-PlusPlus
 pip install -r requirements.txt
+
+# MCP 服务器依赖（Node ≥ 18）
+cd zhihu-mcp-server && npm install
 ```
 
 ## 快速开始
 
-### 登录
+### 登录（爬虫需要）
 
 ```bash
 python login.py
-# 自动打开浏览器 → 登录知乎 → 自动捕获 Cookie
+# 自动打开浏览器 → 扫码登录知乎 → 自动捕获 Cookie 到 config.json
 ```
 
-### 爬取内容
+### 爬取内容（CLI）
 
 ```bash
 # 爬取问题下的回答
@@ -45,13 +58,12 @@ python main.py article <文章ID>
 python main.py collection <收藏夹ID>
 ```
 
-### 示例
+示例：
 
 ```bash
-python main.py question 320078376 --sort voteups
-python main.py collection 960833771
-python main.py question 320078376 --proxy "http://127.0.0.1:7890"
-python main.py question 320078376 --max-pages 5  # 限制抓取页数
+python main.py question <问题ID> --sort voteups          # 按点赞排序
+python main.py question <问题ID> --max-pages 5           # 限制抓取页数
+python main.py question <问题ID> --proxy http://127.0.0.1:7890  # 走代理
 ```
 
 ## 架构
@@ -69,7 +81,7 @@ python main.py question 320078376 --max-pages 5  # 限制抓取页数
 
 ## MCP 服务器
 
-目录 `zhihu-mcp-server/` 内置知乎 MCP 服务（15 个工具 = 11 个查询 + 4 个保存），接入 ZCode/opencode/Claude 后可在 AI 对话中实时查知乎：
+目录 `zhihu-mcp-server/` 内置知乎 MCP 服务，15 个工具（11 查询 + 4 保存）：
 
 ```
 zhihu_hot_list       — 热榜
@@ -89,9 +101,29 @@ zhihu_save_article   — 保存专栏文章（调本爬虫）
 zhihu_save_collection — 保存收藏夹（调本爬虫）
 ```
 
-> 部署注意（2026-09-08）：save_* 四工具经 `SPIDER_DIR=..` 调用本爬虫，只有 MCP 代码住在 `zhihu-mcp-server/` 原生位置时路径才成立。Windows 侧 ZCode 指回 `D:\Tools\zhihuspider\zhihu-mcp-server\index.js` 可用全部 15 个工具；WSL 侧副本 `/home/tang/zhihu-mcp/` 仅 10 个查询工具可用（save_* 断链）。爬虫登录态（config.json/.env）与 MCP 的 `~/.zhihu-mcp` cookies 互相独立。
+### 接入 AI 客户端
 
-> `zhihu_search_web`（2026-09-22 新增）：Bing 信源检索知乎。对比实测：知乎站内搜索强在头部热答（带点赞数），但收录窄、无登录态时长尾覆盖差；Bing 能检索到站内搜不到的专栏长文，但对中文多词查询会静默放宽 `site:` 限制，掺入站外结果——工具内已按域名硬过滤，并在结果中标注知乎类型（question/answer/article/pin/user/collection）与 ID，可直接喂给 `zhihu_get_answer` / `zhihu_save_article` 等。
+以 Claude Desktop / Cursor 等标准 MCP 客户端为例（stdio 方式）：
+
+```json
+{
+  "mcpServers": {
+    "zhihu": {
+      "command": "node",
+      "args": ["<仓库路径>/zhihu-mcp-server/index.js"]
+    }
+  }
+}
+```
+
+- Cookie 存放于 `~/.zhihu-mcp/config.json`，可经 `zhihu_set_cookies` 工具写入，或手动编辑；至少需要 `d_c0` 才能签名
+- `zhihu_save_*` 四个保存工具会在内部调用本仓库的 Python 爬虫，**因此 MCP 必须从本仓库内的 `zhihu-mcp-server/` 启动**（`SPIDER_DIR` 相对路径才成立），且需要本机装有 Python 与依赖；只把 `index.js` 拷走的话查询工具可用，保存工具会断链
+- 爬虫登录态（仓库根 `config.json`）与 MCP 登录态（`~/.zhihu-mcp/config.json`）互相独立
+
+### 双搜索信源说明
+
+- `zhihu_search`（站内）：头部热答质量高、带点赞数，但长尾覆盖弱，结果混 `ai_zhida` 推广位
+- `zhihu_search_web`（Bing）：能检索到站内搜不到的专栏长文；实测 Bing 对中文多词查询会静默放宽 `site:` 限制，本工具已按 `zhihu.com` 域名硬过滤，并在结果中标注知乎类型（question/answer/article/pin/user/collection）与 ID，可直接喂给 `zhihu_get_answer` / `zhihu_save_article` 等；劣化查询可能返回 0 条（宁缺毋滥）
 
 ## Cookie
 
@@ -105,10 +137,24 @@ output/[<id>] <title>/
 └── .progress.json                       # 断点续传
 ```
 
-## 注意事项
+## 项目结构
+
+```
+├── main.py               # CLI 入口：question / answer / article / collection / login
+├── crawler.py            # ZhihuCrawler（签名 API）+ BrowserCrawler（浏览器兜底）
+├── zse_signer.py         # zse96 v2 签名
+├── parser.py             # HTML → Markdown + YAML front matter
+├── zhihu_spider.py       # 业务编排、断点续传、文件保存
+├── login.py              # DrissionPage 扫码登录、Cookie 捕获
+├── web_search.py         # 独立的 Bing/DuckDuckGo 搜索小工具（不被爬虫引用）
+├── zhihu-mcp-server/     # Node.js MCP 服务器（15 工具）
+└── tests/                # pytest 纯函数测试（python -m pytest）
+```
+
+## 免责声明
 
 - 请求间隔 3 秒，反爬礼貌，不是性能问题
-- 仅用于个人学习和研究
+- 仅用于个人学习和研究，请遵守知乎用户协议与 robots 协议，勿用于商业用途
 
 ## 致谢
 
@@ -121,3 +167,7 @@ output/[<id>] <title>/
 
 - [zly2006/zhihu-plus-plus](https://github.com/zly2006/zhihu-plus-plus) — `zse_signer.py` 的 zse96 v2 签名算法移植来源
 - [meurz/zhihu-mcp-server](https://github.com/meurz/zhihu-mcp-server)（原名 `iteng007/zhihu-mcp-server`）— `zhihu-mcp-server/` 的上游项目
+
+## License
+
+MCP 服务器部分（`zhihu-mcp-server/`）继承上游为 AGPL-3.0；其余部分暂未设许可证（如需使用请先开 issue 沟通）。

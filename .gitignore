@@ -21,3 +21,9 @@ __pycache__/
 
 # Node (zhihu-mcp-server)
 node_modules/
+
+# 内部协作文档（不公开）
+HANDOFF.md
+AGENTS.md
+技术方案.md
+说明.md
