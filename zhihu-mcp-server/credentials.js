@@ -5,7 +5,10 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const CRED_DIR = path.join(os.homedir(), '.zhihu-mcp');
 const CRED_FILE = path.join(CRED_DIR, 'credentials.json');
 // 兼容迁移源（只读）
