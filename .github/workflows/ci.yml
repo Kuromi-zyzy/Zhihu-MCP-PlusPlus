@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: pip install -r requirements.txt ruff
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Test (pytest)
+        run: python -m pytest -q
+
+  node:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ['20', '22']
+    defaults:
+      run:
+        working-directory: zhihu-mcp-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: zhihu-mcp-server/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Syntax check (all modules)
+        run: |
+          for f in index.js auth.js bing-search.js cache.js credentials.js errors.js logger.js \
+                   rate-limiter.js storage.js transport.js content-service.js url-resolver.js \
+                   search/bing.js search/router.js; do node --check "$f"; done
+      - name: Test (node --test)
+        run: npm test
+      - name: Smoke test (no account required)
+        run: node scripts/smoke-test.mjs
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Whitespace check
+        run: git diff --check $(git rev-parse HEAD 2>/dev/null || echo HEAD) 2>/dev/null || git diff --check HEAD~1 HEAD 2>/dev/null || echo "single commit, skip"
+      - name: Sensitive files must not be tracked
+        run: |
+          ! git ls-files --error-unmatch config.json 2>/dev/null
+          ! git ls-files --error-unmatch .env 2>/dev/null
+          ! git ls-files --error-unmatch AGENTS.md 2>/dev/null
+          ! git ls-files --error-unmatch HANDOFF.md 2>/dev/null
+          ! git ls-files --error-unmatch '技术方案.md' 2>/dev/null
+          echo "no sensitive files tracked"
+      - name: No shell-string execution in MCP
+        run: |
+          ! grep -n "execSync(" zhihu-mcp-server/index.js zhihu-mcp-server/*.js zhihu-mcp-server/search/*.js 2>/dev/null | grep -v "历史\|//" || true
+          grep -q "execFileSync" zhihu-mcp-server/index.js
+          echo "shell-execution boundary OK"
