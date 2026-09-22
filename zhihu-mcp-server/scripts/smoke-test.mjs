@@ -42,7 +42,7 @@ try {
   };
 
   const a = await call(10, 'zhihu_auth_status', {});
-  add('auth status', a.ok === true, a.ok ? `logged_in=${a.data?.logged_in}` : `error=${a.error?.code || 'no response'}`);
+  add('auth status', a.ok === true, a.ok ? `logged_in=${a.data?.logged_in}` : `error=${a.error?.code}: ${String(a.error?.message).slice(0, 120)}`);
 
   const r = await call(11, 'zhihu_resolve_url', { url: 'https://www.zhihu.com/question/123/answer/456' });
   add('resolve url', r.ok === true && r.data?.type === 'answer');
@@ -57,7 +57,7 @@ try {
   const d = await call(14, 'zhihu_diagnostics', {});
   // sqlite 可用性是硬指标（无网络依赖）；bing 可达性在网络受限环境只记录不判失败
   const sqliteOk = d.ok === true && d.data?.sqlite?.ok === true;
-  add('diagnostics (sqlite)', sqliteOk, d.ok ? `sqlite=${d.data?.sqlite?.ok} bing=${d.data?.bing?.reachable}` : `skipped (${d.error?.code || 'no response'})`);
+  add('diagnostics (sqlite)', sqliteOk, d.ok ? `sqlite=${d.data?.sqlite?.ok} bing=${d.data?.bing?.reachable}` : `error=${d.error?.code}: ${String(d.error?.message).slice(0, 120)}`);
   add('diagnostics (bing reachable)', d.ok === true ? (d.data?.bing?.reachable === true || d.data?.bing?.reachable === false) : false,
     d.ok ? `bing=${d.data?.bing?.reachable}` : 'skipped');
 
