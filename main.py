@@ -38,7 +38,21 @@ if os.path.exists(_env_path):
                 _v = _v.strip().strip('"').strip("'")
                 os.environ.setdefault(_k.strip(), _v)
 
-# 从 config.json 加载 Cookie（由 login.py 生成）
+# 从 credentials.json 加载 Cookie（v1 统一凭据存储，Python/Node 共用）
+# 位置：~/.zhihu-mcp/credentials.json 的 cookies 字段
+_cred_path = os.path.join(os.path.expanduser("~"), ".zhihu-mcp", "credentials.json")
+_credentials_cookie = ""
+if os.path.exists(_cred_path):
+    try:
+        with open(_cred_path, "r", encoding="utf-8") as _f:
+            _cred = json.load(_f)
+            _pairs = _cred.get("cookies", {})
+            if _pairs:
+                _credentials_cookie = "; ".join(f"{k}={v}" for k, v in _pairs.items())
+    except (json.JSONDecodeError, IOError):
+        pass
+
+# 从 config.json 加载 Cookie（旧路径，兼容保留；login.py 生成）
 _config_path = os.path.join(os.path.dirname(__file__), "config.json")
 _config_cookie = ""
 if os.path.exists(_config_path):
@@ -96,9 +110,11 @@ def print_config_help():
 
 
 def _resolve_cookie(cli_cookie: str) -> str:
-    """Cookie 优先级: CLI 参数 > config.json > .env/环境变量"""
+    """Cookie 优先级: CLI 参数 > credentials.json(统一凭据) > config.json > .env/环境变量"""
     if cli_cookie:
         return cli_cookie
+    if _credentials_cookie:
+        return _credentials_cookie
     if _config_cookie:
         return _config_cookie
     return os.environ.get("ZHIHU_COOKIE", "")

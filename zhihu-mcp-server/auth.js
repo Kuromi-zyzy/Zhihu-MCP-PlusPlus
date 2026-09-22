@@ -1,0 +1,73 @@
+// 认证服务（v1 §2/§3）：DrissionPage 扫码登录 + /api/v4/me 验证，验证通过才写统一凭据库
+import { getCookies, setCookies, loadStore } from './credentials.js';
+
+const ME_URL = 'https://www.zhihu.com/api/v4/me';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+
+// 用给定 cookie 串调 /api/v4/me 验证
+export async function validateCookieString(cookieStr) {
+  try {
+    const resp = await fetch(ME_URL, {
+      headers: { Cookie: cookieStr, 'User-Agent': UA },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (resp.status === 200) {
+      const data = await resp.json();
+      return { ok: true, user: { id: String(data.id ?? ''), name: data.name || '' } };
+    }
+    return { ok: false, info: `HTTP ${resp.status}` };
+  } catch (e) {
+    return { ok: false, info: `${e?.name || 'Error'}: ${e?.message || e}` };
+  }
+}
+
+// 用当前凭据库验证
+export async function validateCurrent() {
+  const cookies = getCookies();
+  const entries = Object.entries(cookies);
+  if (!entries.length) return { ok: false, info: '凭据库为空' };
+  return validateCookieString(entries.map(([k, v]) => `${k}=${v}`).join('; '));
+}
+
+// 浏览器登录：DrissionPage（Python 侧 login.py 已实现同样逻辑）。
+// MCP 进程内不直接跑浏览器，改为引导用户运行 login.py，或从已有登录页 cookie 导入。
+// 这里提供 DrissionPage 不可用时的说明 + 对已登录浏览器 cookie 的拉取（DevTools 协议直连）。
+export async function browserLogin() {
+  // 惰性 spawn python login.py，捕获其输出判断是否成功
+  const { execFileSync } = await import('child_process');
+  const path = await import('path');
+  const { fileURLToPath } = await import('url');
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const spiderDir = path.resolve(__dirname, '..');
+  try {
+    const output = execFileSync('python', ['login.py'], {
+      cwd: spiderDir, encoding: 'utf8', timeout: 360000, windowsHide: true
+    });
+    // login.py 验证通过后已写入 config.json；同步进统一凭据库
+    const fs = await import('fs');
+    const cfgPath = path.join(spiderDir, 'config.json');
+    let ok = false, user = null;
+    if (fs.existsSync(cfgPath)) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        const cookies = {};
+        for (const pair of (cfg.cookie || '').split(';')) {
+          const i = pair.indexOf('=');
+          if (i > 0) cookies[pair.slice(0, i).trim()] = pair.slice(i + 1).trim();
+        }
+        if (Object.keys(cookies).length) {
+          setCookies(cookies, { user: null, validated_at: null });
+          const v = await validateCurrent();
+          if (v.ok) {
+            setCookies({}, { user: v.user, validated_at: new Date().toISOString() });
+            ok = true;
+            user = v.user;
+          }
+        }
+      } catch { /* fallthrough */ }
+    }
+    return { ok, user, output: output.slice(-800) };
+  } catch (e) {
+    return { ok: false, info: `login.py 执行失败: ${e.message?.slice(0, 200)}` };
+  }
+}
