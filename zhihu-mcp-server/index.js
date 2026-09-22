@@ -29,9 +29,10 @@ import {
   fetchAnswers, listComments, listReplies
 } from './content-service.js';
 import { zhihuWebRequest } from './transport.js';
+import { importOutputMarkdown } from './ingest.js';
 import { browserLogin, validateCurrent as validateCookie, validateCookieString } from './auth.js';
 import {
-  upsertContent, localSearch, reindex, dbStats, semanticSearch, hybridSearch,
+  upsertContent, localSearch, rebuildFts, contentCount, dbStats, semanticSearch, hybridSearch,
   embeddingProviderInfo, contentHash, DB_FILE
 } from './storage.js';
 import { cacheGet, cacheSet } from './cache.js';
@@ -274,7 +275,7 @@ const TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   },
   {
-    name: 'zhihu_reindex', title: '重建本地索引', description: '重建本地 FTS 全文索引。',
+    name: 'zhihu_reindex', title: '重建本地索引', description: '扫描 output/ 全部 Markdown 导入本地知识库（SQLite），并重建 FTS 全文索引。',
     inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
@@ -435,19 +436,24 @@ async function handleTool(name, args, startedAt) {
       const spiderArgs = ['question', qid, '--sort', requireEnum(args.sort, 'sort', ['default', 'voteups', 'created'], 'default')];
       const pages = requireOptionalInt(args.max_pages, 'max_pages', { min: 1, max: 500 });
       if (pages !== undefined) spiderArgs.push('--max-pages', String(pages));
-      return ok({ output: runSpider(spiderArgs, 120000) });
+      const output = runSpider(spiderArgs, 120000);
+      // Markdown → SQLite 一体化：爬虫落盘后同步进本地知识库（SHA-256 去重，可安全重扫）
+      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown() });
     }
     case 'zhihu_save_answer': {
-      return ok({ output: runSpider(['answer', requireValidId(args.answer_id, 'answer_id')], 60000) });
+      const output = runSpider(['answer', requireValidId(args.answer_id, 'answer_id')], 60000);
+      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown() });
     }
     case 'zhihu_save_article': {
-      return ok({ output: runSpider(['article', requireValidId(args.article_id, 'article_id')], 60000) });
+      const output = runSpider(['article', requireValidId(args.article_id, 'article_id')], 60000);
+      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown() });
     }
     case 'zhihu_save_collection': {
       const spiderArgs = ['collection', requireValidId(args.collection_id, 'collection_id')];
       const pages = requireOptionalInt(args.max_pages, 'max_pages', { min: 1, max: 500 });
       if (pages !== undefined) spiderArgs.push('--max-pages', String(pages));
-      return ok({ output: runSpider(spiderArgs, 180000) });
+      const output = runSpider(spiderArgs, 180000);
+      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown() });
     }
     case 'zhihu_save_pin': {
       const pid = requireValidId(args.pin_id, 'pin_id');
@@ -471,7 +477,12 @@ async function handleTool(name, args, startedAt) {
       return ok(r);
     }
     case 'zhihu_reindex': {
-      return ok(reindex());
+      // 真重建：扫描 output/ Markdown 导入 SQLite，再物理重刷 FTS（v1 一体化收口）
+      const before = contentCount();
+      const ingest = importOutputMarkdown();
+      rebuildFts();
+      const after = contentCount();
+      return ok({ ...ingest, before, after, rebuilt_fts: true });
     }
 
     // ---- Auth ----
@@ -487,9 +498,16 @@ async function handleTool(name, args, startedAt) {
     }
     case 'zhihu_auth_login': {
       requireEnum(args.mode, 'mode', ['browser'], 'browser');
-      const result = validateCookie();
-      if (!result.ok) return fail('not_authenticated', `登录未通过验证: ${result.info}`);
-      return ok({ logged_in: true, user: result.user, credential_store: CRED_FILE });
+      // 现有 Cookie 仍有效则快速返回；否则打开浏览器扫码（login.py），验证通过才入库
+      const existing = await validateCookie();
+      if (existing.ok) {
+        return ok({ logged_in: true, user: existing.user, credential_store: CRED_FILE, skipped_browser: true });
+      }
+      const result = await browserLogin();
+      if (!result.ok) {
+        return fail('not_authenticated', `浏览器登录未通过验证: ${result.info || result.output || '未捕获到登录令牌'}（原凭据未改动）`);
+      }
+      return ok({ logged_in: true, user: result.user, credential_store: CRED_FILE, skipped_browser: false });
     }
     case 'zhihu_auth_import': {
       const cookies = args.cookies || {};

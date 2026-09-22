@@ -9,7 +9,7 @@
 2. zhihu_resolve_url   # 只有不规范的 URL 时才需要
 3. zhihu_get_content   # 对感兴趣的对象取详情（include_content=false 先看摘要也可以）
 4. zhihu_list_comments # 需要争议/观点时
-5. zhihu_save_content  # 重要内容存档（进 Markdown + 本地索引）
+5. zhihu_save_content  # 重要内容存档（直写本地索引；zhihu_save_* 爬虫路径落盘 Markdown 后也自动入索引）
 ```
 
 ## 第二次提问走本地

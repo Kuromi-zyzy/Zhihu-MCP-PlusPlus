@@ -67,6 +67,43 @@ def save_config(config: dict):
     print(f"\n  ✓ Config saved to: {CONFIG_FILE}")
 
 
+CRED_STORE = os.path.join(os.path.expanduser("~"), ".zhihu-mcp", "credentials.json")
+
+
+def sync_credentials_store(cookie_str: str, user_name: str):
+    """登录成功后直写统一凭据库（v1 §3：Python/Node 共用同一份登录态）。
+
+    只更新 cookies/user/validated_at/updated_at，不覆盖库内其他字段；
+    写失败只告警不中断——config.json 仍是权威副本，credentials.js 可从它迁移。
+    """
+    try:
+        pairs = {}
+        for pair in cookie_str.split(";"):
+            i = pair.find("=")
+            if i > 0:
+                pairs[pair[:i].strip()] = pair[i + 1:].strip()
+        store = {"version": 1, "cookies": {}, "user": None, "validated_at": None, "updated_at": None}
+        if os.path.exists(CRED_STORE):
+            with open(CRED_STORE, "r", encoding="utf-8") as f:
+                try:
+                    store = json.load(f)
+                except json.JSONDecodeError:
+                    pass  # 损坏则重建
+        store.setdefault("version", 1)
+        store["cookies"] = pairs
+        store["user"] = user_name
+        store["validated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        store["updated_at"] = store["validated_at"]
+        os.makedirs(os.path.dirname(CRED_STORE), exist_ok=True)
+        with open(CRED_STORE, "w", encoding="utf-8") as f:
+            json.dump(store, f, indent=2, ensure_ascii=False)
+        if os.name == "posix":
+            os.chmod(CRED_STORE, 0o600)
+        print(f"  ✓ 统一凭据库已同步: {CRED_STORE}")
+    except OSError as e:
+        print(f"  ⚠ 统一凭据库写入失败（不影响爬虫使用）: {e}")
+
+
 def is_useful_cookie(name: str) -> bool:
     if name in BLACKLIST_EXACT:
         return False
@@ -177,6 +214,7 @@ def main(headless: bool = False):
             config = load_config()
             config["cookie"] = cookie
             save_config(config)
+            sync_credentials_store(cookie, info)
             print("\n  💡 现在可以运行爬虫了:")
             print("      python main.py question <问题ID>")
             print("      python main.py article  <文章ID>")

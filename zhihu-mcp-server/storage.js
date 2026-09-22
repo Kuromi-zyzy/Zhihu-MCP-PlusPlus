@@ -135,14 +135,15 @@ export function localSearch({ keyword, type, author, limit = 10 }) {
   return { items: rows, total: rows.length, mode: 'fts' };
 }
 
-// 重建索引（zhihu_reindex）：从 output/ Markdown 与既有行重建 FTS
-export function reindex() {
+// FTS 物理重建（触发器负责增量同步，rebuild 保证索引与 contents 严格一致）
+export function rebuildFts() {
   const d = getDb();
-  const before = d.prepare('SELECT COUNT(*) as n FROM contents').get().n;
-  // 触发器同步 FTS；此处强制全表重刷 FTS 行
   d.exec(`INSERT INTO contents_fts(contents_fts) VALUES('rebuild')`);
-  const after = d.prepare('SELECT COUNT(*) as n FROM contents').get().n;
-  return { indexed: after, before, rebuilt_fts: true };
+}
+
+// 既有行数快照（reindex 前后对比用）
+export function contentCount() {
+  return getDb().prepare('SELECT COUNT(*) as n FROM contents').get().n;
 }
 
 export function dbStats() {

@@ -42,6 +42,7 @@ Fallback 编排（`withFallback`）：`not_found / invalid_input / not_authentic
 ## 本地知识库
 
 - 主存储：Markdown（`output/`，人类可读，Python 爬虫写入，带 YAML front matter 与断点续传）
+- 一体化：`ingest.js` 把 `output/` Markdown 导入 SQLite——`zhihu_save_*`（Python 路径）执行后自动导入，`zhihu_reindex` 全量重扫；两条保存路径（`zhihu_save_content` 直写 / 爬虫 Markdown）汇聚同一查询层
 - 查询层：`~/.zhihu-mcp/index.sqlite`
   - `contents` 表：content_id（`{type}:{id}` 复合主键）、content_hash（SHA-256，归一化 CRLF 后）
   - `contents_fts`：FTS5 **trigram** tokenizer（unicode61 对连续中文是整 token，实测无法子串命中；trigram 支持 ≥3 字子串，<3 字符 LIKE 兜底）
@@ -50,7 +51,7 @@ Fallback 编排（`withFallback`）：`not_found / invalid_input / not_authentic
 
 ## 凭据与安全
 
-- `~/.zhihu-mcp/credentials.json`：统一 Credential Store，Python（main.py）与 Node（credentials.js）双读；旧两处 config.json 只读迁移
+- `~/.zhihu-mcp/credentials.json`：统一 Credential Store，Python 与 Node 双读——`login.py` 登录验证通过后直写，Node（credentials.js）读取；旧两处 config.json 只读迁移
 - 验证闸门：任何写入路径都必须先过 `/api/v4/me`（HTTP 200 + 用户身份）
 - 边界：无 execSync 字符串执行；Cookie 不进 Git/日志/客户端响应；HTTP 默认 127.0.0.1；v1 无知乎远端写操作
 

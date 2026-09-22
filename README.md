@@ -66,8 +66,8 @@ node zhihu-mcp-server/index.js --http --port 8635
 | **Search** | `zhihu_search`（多源路由 auto/zhihu/web/local）、`zhihu_resolve_url` |
 | **Content** | `zhihu_get_content`（统一入口，url 或 type+id）、`zhihu_get_question/answer/article/pin/user`、`zhihu_question_answers`、`zhihu_hot_list`、`zhihu_hot_search` |
 | **Discussion** | `zhihu_list_comments`、`zhihu_list_replies`（楼中楼） |
-| **Archive** | `zhihu_save_content`（统一保存）、`zhihu_save_question/answer/article/collection/pin` |
-| **Local Knowledge** | `zhihu_local_search`（keyword/semantic/hybrid）、`zhihu_reindex` |
+| **Archive** | `zhihu_save_content`（统一保存）、`zhihu_save_question/answer/article/collection/pin`（爬虫落盘后自动入知识库） |
+| **Local Knowledge** | `zhihu_local_search`（keyword/semantic/hybrid）、`zhihu_reindex`（扫描 Markdown 重建索引） |
 | **Auth** | `zhihu_auth_status/login/import/logout` |
 | **Diagnostics** | `zhihu_get_config`、`zhihu_diagnostics` |
 
@@ -83,7 +83,8 @@ zhihu-mcp-server/
 ├── search/
 │   ├── bing.js         # Bing site:zhihu.com（域名硬过滤 + 15s 超时 + trigram 解析）
 │   └── router.js       # 多源搜索路由：合并、去重、确定性排序
-├── storage.js          # SQLite + FTS5(trigram 中文) + SHA-256 去重 + 可选 embedding
+├── storage.js          # SQLite + FTS5(trigram 中文) + SHA-256 去重 + 可插拔 embedding 接口
+├── ingest.js           # 归档导入器：output/ Markdown（YAML front matter）→ SQLite
 ├── credentials.js      # 统一凭据库 ~/.zhihu-mcp/credentials.json（Python/Node 共用）
 ├── auth.js             # /api/v4/me 验证闸门
 ├── errors.js           # 14 个标准错误码 + envelope + context budget
@@ -96,11 +97,12 @@ Python 侧（爬虫）：`crawler.py` 真三层递进（签名 Web API → 无�
 
 ### 关键设计
 
-- **统一 Credential Store**：`~/.zhihu-mcp/credentials.json`（version/cookies/user/validated_at），Python 与 Node 双读；旧 `config.json` 只读迁移兼容。Cookie 不进 Git、不进日志、不回传客户端。
+- **统一 Credential Store**：`~/.zhihu-mcp/credentials.json`（version/cookies/user/validated_at），`login.py` 与 MCP 双向共用（登录成功 Python 直写、Node 只读验证）；旧 `config.json` 只读迁移兼容。Cookie 不进 Git、不进日志、不回传客户端。
 - **重试策略**：仅 timeout/网络错误/5xx 重试（≤2 次指数退避）；401/403/429 立即 fallback，不撞墙。
 - **Context Budget**：读取工具统一支持 `fields`（字段投影）、`include_content`、`max_content_chars`（截断带标记）。
 - **中文检索**：FTS5 trigram tokenizer（unicode61 会把连续中文当整块 token，实测）；<3 字符关键词 LIKE 兜底。
-- **Embedding 可选**：`ZHIHU_EMBEDDING_PROVIDER=local-hash` 等配置启用；未配置时 semantic/hybrid 自动降级 keyword，绝不阻塞启动。
+- **归档一体化**：`zhihu_save_*`（Python 爬虫路径）落盘 Markdown 后自动导入 SQLite；`zhihu_reindex` 全量重扫 `output/`。两条保存路径（`zhihu_save_content` 直写 / 爬虫 Markdown）汇聚同一知识库，`zhihu_local_search` 统一检索。
+- **Embedding 为可插拔接口**：支持 `ZHIHU_EMBEDDING_PROVIDER` 配置；内置 `local-hash` 仅为链路联调的确定性伪向量（非语义 embedding）。未配置真实 provider 时 semantic/hybrid 自动降级 keyword 检索，绝不阻塞启动。
 
 ## Security
 

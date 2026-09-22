@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.0-rc2 (2026-09-23)
+
+发布验收修复（外部验收意见 → 收口）：
+
+### Fixed
+- `zhihu_auth_login` 描述与行为不符：handler 误调 `validateCurrent()`（只查现有 Cookie），现改为真正走 `browserLogin()`（DrissionPage 扫码 + 验证闸门）；现有 Cookie 仍有效时快速返回（`skipped_browser: true`）
+- `login.py` 登录成功后直写统一凭据库 `~/.zhihu-mcp/credentials.json`（此前只写仓库 config.json，Node 侧需二次迁移才见新凭据）
+
+### Added
+- `ingest.js` 归档导入器：`output/` Markdown（YAML front matter）→ SQLite，answer/article/pin/question 四类 URL 形态 + 站外拒绝
+- `zhihu_reindex` 兑现文档语义：真实执行「扫描 output/ Markdown → 导入 contents → 物理重建 FTS」（此前只 rebuild 既有行）
+- `zhihu_save_question/answer/article/collection`（Python 爬虫路径）落盘后自动同步本地知识库，Markdown 与 SQLite 不再是平行宇宙
+
+### Changed
+- README/文档诚实化：Embedding 明确为「可插拔接口，local-hash 仅为链路联调伪向量，非语义 embedding」
+- 测试 32 → 37（ingest 5 项）；Python 51 pytest 全过；fresh-store smoke 9/9
+
 ## v1.0.0 (2026-09-22)
 
 一次性交付版本。定位：**面向 AI Agent 的知乎检索、阅读、研究、归档与本地知识库后端**。

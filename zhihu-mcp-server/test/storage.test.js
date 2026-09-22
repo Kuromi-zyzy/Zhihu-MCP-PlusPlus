@@ -12,7 +12,7 @@ const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'zhmcp_st_'));
 process.env.ZHIHU_MCP_DATA_DIR = DATA_DIR;
 const storage = await import(`../storage.js?case=${crypto.randomUUID()}`);
 
-const { contentHash, upsertContent, localSearch, reindex, dbStats, semanticSearch, hybridSearch, embeddingProviderInfo } = storage;
+const { contentHash, upsertContent, localSearch, rebuildFts, contentCount, dbStats, semanticSearch, hybridSearch, embeddingProviderInfo } = storage;
 
 test('contentHash: 归一化（CRLF/首尾空白）确定性', () => {
   assert.equal(contentHash('a\r\nb'), contentHash('a\nb'));
@@ -47,9 +47,10 @@ test('localSearch: FTS 查询串注入安全（引号翻倍）', () => {
   assert.ok(Array.isArray(r.items));
 });
 
-test('reindex + dbStats', () => {
-  const r = reindex();
-  assert.equal(r.rebuilt_fts, true);
+test('rebuildFts + contentCount + dbStats', () => {
+  const before = contentCount();
+  assert.doesNotThrow(() => rebuildFts());
+  assert.equal(contentCount(), before);
   const s = dbStats();
   assert.ok(s.total >= 1);
   assert.ok(s.by_type.some(t => t.content_type === 'answer'));
