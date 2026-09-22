@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "node --test test/*.test.js test/**/*.test.js",
+    "test": "node --test test/*.test.js",
     "smoke": "node scripts/smoke-test.mjs"
   },
   "keywords": [
