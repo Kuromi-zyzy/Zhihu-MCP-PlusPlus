@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { parseBingResults, classifyZhihuUrl, ZHIHU_NEXT_TOOLS, unwrapBingHref } from '../bing-search.js';
+import { parseBingResults, classifyZhihuUrl, ZHIHU_NEXT_TOOLS, unwrapBingHref } from '../search/bing.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixture = readFileSync(path.join(__dirname, 'fixtures', 'bing-search.html'), 'utf8');

@@ -1,7 +1,7 @@
 {
   "name": "zhihu-mcp-server",
   "version": "1.0.0",
-  "description": "MCP server for Zhihu API with authentication and signing",
+  "description": "Zhihu MCP++ — 知乎检索、阅读、研究、归档与本地知识库 MCP 后端",
   "main": "index.js",
   "type": "module",
   "bin": {
@@ -11,7 +11,11 @@
     "start": "node index.js",
     "test": "node --test \"test/*.test.js\""
   },
-  "keywords": ["mcp", "zhihu", "api"],
+  "keywords": [
+    "mcp",
+    "zhihu",
+    "api"
+  ],
   "author": "",
   "license": "AGPL-3.0",
   "dependencies": {
