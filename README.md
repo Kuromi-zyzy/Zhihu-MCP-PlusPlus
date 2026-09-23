@@ -97,7 +97,7 @@ Python 侧（爬虫）：`crawler.py` 真三层递进（签名 Web API → 无�
 
 ### 关键设计
 
-- **统一 Credential Store**：`~/.zhihu-mcp/credentials.json`（version/cookies/user/validated_at），`login.py` 与 MCP 双向共用（登录成功 Python 直写、Node 只读验证）；旧 `config.json` 只读迁移兼容。Cookie 不进 Git、不进日志、不回传客户端。
+- **统一 Credential Store（单一来源）**：`<数据目录>/credentials.json`（version/cookies/user/validated_at）是唯一登录态存储——`login.py` 验证通过后直写（唯一写入点），MCP 读取；数据目录由 `ZHIHU_MCP_DATA_DIR` 统一控制（Python/Node 同语义，默认 `~/.zhihu-mcp`，测试隔离靠它）。旧 `config.json` 已停止写入，仅首次使用时只读迁移。Cookie 不进 Git、不进日志、不回传客户端。
 - **重试策略**：仅 timeout/网络错误/5xx 重试（≤2 次指数退避）；401/403/429 立即 fallback，不撞墙。
 - **Context Budget**：读取工具统一支持 `fields`（字段投影）、`include_content`、`max_content_chars`（截断带标记）。
 - **中文检索**：FTS5 trigram tokenizer（unicode61 会把连续中文当整块 token，实测）；<3 字符关键词 LIKE 兜底。

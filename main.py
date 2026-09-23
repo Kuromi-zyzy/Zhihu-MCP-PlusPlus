@@ -38,9 +38,11 @@ if os.path.exists(_env_path):
                 _v = _v.strip().strip('"').strip("'")
                 os.environ.setdefault(_k.strip(), _v)
 
-# 从 credentials.json 加载 Cookie（v1 统一凭据存储，Python/Node 共用）
-# 位置：~/.zhihu-mcp/credentials.json 的 cookies 字段
-_cred_path = os.path.join(os.path.expanduser("~"), ".zhihu-mcp", "credentials.json")
+# 从统一凭据库加载 Cookie（v1 §3 单一来源，Python/Node 共用）
+# 位置：<CRED_DIR>/credentials.json 的 cookies 字段；CRED_DIR 与 Node credentials.js
+# / login.py 同语义——ZHIHU_MCP_DATA_DIR 优先，默认 ~/.zhihu-mcp
+_cred_dir = os.environ.get("ZHIHU_MCP_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".zhihu-mcp")
+_cred_path = os.path.join(_cred_dir, "credentials.json")
 _credentials_cookie = ""
 if os.path.exists(_cred_path):
     try:
@@ -52,10 +54,10 @@ if os.path.exists(_cred_path):
     except (json.JSONDecodeError, IOError):
         pass
 
-# 从 config.json 加载 Cookie（旧路径，兼容保留；login.py 生成）
+# 从 config.json 加载 Cookie（legacy 只读兜底；login.py 已不再写此文件）
 _config_path = os.path.join(os.path.dirname(__file__), "config.json")
 _config_cookie = ""
-if os.path.exists(_config_path):
+if not _credentials_cookie and os.path.exists(_config_path):
     try:
         with open(_config_path, "r", encoding="utf-8") as _f:
             _cfg = json.load(_f)

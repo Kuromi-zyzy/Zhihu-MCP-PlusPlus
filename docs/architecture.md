@@ -51,7 +51,7 @@ Fallback 编排（`withFallback`）：`not_found / invalid_input / not_authentic
 
 ## 凭据与安全
 
-- `~/.zhihu-mcp/credentials.json`：统一 Credential Store，Python 与 Node 双读——`login.py` 登录验证通过后直写，Node（credentials.js）读取；旧两处 config.json 只读迁移
+- `<数据目录>/credentials.json`：统一 Credential Store（唯一登录态存储），数据目录由 `ZHIHU_MCP_DATA_DIR` 统一控制（Python/Node 同语义）——`login.py` 验证通过后直写（唯一写入点），Node（credentials.js）读取验证；旧两处 config.json 已停止写入，仅首次只读迁移
 - 验证闸门：任何写入路径都必须先过 `/api/v4/me`（HTTP 200 + 用户身份）
 - 边界：无 execSync 字符串执行；Cookie 不进 Git/日志/客户端响应；HTTP 默认 127.0.0.1；v1 无知乎远端写操作
 

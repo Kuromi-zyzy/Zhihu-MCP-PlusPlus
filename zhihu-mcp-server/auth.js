@@ -56,30 +56,14 @@ export async function browserLogin() {
   });
 
   try {
-    // login.py 验证通过后已直写统一凭据库（sync_credentials_store）；此处读回验证并补全 user
-    const fs = await import('fs');
-    const cfgPath = path.join(spiderDir, 'config.json');
-    let ok = false, user = null;
-    if (fs.existsSync(cfgPath)) {
-      try {
-        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-        const cookies = {};
-        for (const pair of (cfg.cookie || '').split(';')) {
-          const i = pair.indexOf('=');
-          if (i > 0) cookies[pair.slice(0, i).trim()] = pair.slice(i + 1).trim();
-        }
-        if (Object.keys(cookies).length) {
-          setCookies(cookies, { user: null, validated_at: null, replace: true });
-          const v = await validateCurrent();
-          if (v.ok) {
-            setCookies({}, { user: v.user, validated_at: new Date().toISOString() });
-            ok = true;
-            user = v.user;
-          }
-        }
-      } catch { /* fallthrough */ }
+    // login.py 验证通过后已直写统一凭据库（write_credentials_store，唯一写入点）；
+    // 此处只验证当前凭据库并补全 user，不再回读仓库 config.json（legacy 只读迁移语义）
+    const v = await validateCurrent();
+    if (v.ok) {
+      setCookies({}, { user: v.user, validated_at: new Date().toISOString() });
+      return { ok: true, user: v.user, output: output.slice(-800) };
     }
-    return { ok, user, output: output.slice(-800) };
+    return { ok: false, info: `login.py 已执行但凭据库验证未通过: ${v.info}` };
   } catch (e) {
     return { ok: false, info: `login.py 执行失败: ${e.message?.slice(0, 200)}` };
   }

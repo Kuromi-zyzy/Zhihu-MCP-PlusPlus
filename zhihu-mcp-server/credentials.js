@@ -30,7 +30,7 @@ function applyFilePerms() {
 }
 
 function migrateLegacy() {
-  // 迁移源 1：~/.zhihu-mcp/config.json（MCP 旧 cookies 字段）；隔离目录（测试）不迁移
+  // 迁移源 1：~/.zhihu-mcp/config.json（MCP 旧 cookies 字段）；隔离目录（测试）完全不迁移
   if (LEGACY_MCP_CONFIG && fs.existsSync(LEGACY_MCP_CONFIG)) {
     try {
       const legacy = JSON.parse(fs.readFileSync(LEGACY_MCP_CONFIG, 'utf8'));
@@ -52,7 +52,9 @@ function migrateLegacy() {
       console.error('[credentials] legacy mcp config unreadable:', e.message);
     }
   }
-  // 迁移源 2：仓库根 config.json（爬虫 cookie 字段，整串解析出键值）
+  // 迁移源 2：仓库根 config.json（爬虫 cookie 字段）——同样只在默认目录迁移；
+  // 隔离目录（ZHIHU_MCP_DATA_DIR）下禁用，测试绝不读真实 legacy 文件
+  if (!LEGACY_MCP_CONFIG) return;
   const spiderConfig = path.resolve(__dirname, '..', 'config.json');
   if (fs.existsSync(spiderConfig)) {
     try {

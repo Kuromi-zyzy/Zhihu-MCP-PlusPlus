@@ -52,8 +52,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Whitespace check
-        run: git diff --check $(git rev-parse HEAD 2>/dev/null || echo HEAD) 2>/dev/null || git diff --check HEAD~1 HEAD 2>/dev/null || echo "single commit, skip"
+        with:
+          fetch-depth: 2  # whitespace 检查需要 HEAD~1，shallow 单提交会让检查静默跳过
+      - name: Whitespace check (HEAD commit vs parent, real gate)
+        run: |
+          # 只检查本次推送引入的改动；发现空白错误（trailing/space-before-tab 等）即失败
+          if git diff --check HEAD~1 HEAD; then
+            echo "whitespace OK"
+          else
+            echo "::error::whitespace errors introduced by this push (see above)"
+            exit 1
+          fi
       - name: Sensitive files must not be tracked
         run: |
           ! git ls-files --error-unmatch config.json 2>/dev/null
