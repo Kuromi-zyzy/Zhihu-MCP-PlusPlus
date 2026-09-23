@@ -101,14 +101,14 @@ Python 侧（爬虫）：`crawler.py` 真三层递进（签名 Web API → 无�
 - **重试策略**：仅 timeout/网络错误/5xx 重试（≤2 次指数退避）；401/403/429 立即 fallback，不撞墙。
 - **Context Budget**：读取工具统一支持 `fields`（字段投影）、`include_content`、`max_content_chars`（截断带标记）。
 - **中文检索**：FTS5 trigram tokenizer（unicode61 会把连续中文当整块 token，实测）；<3 字符关键词 LIKE 兜底。
-- **归档一体化**：`zhihu_save_*`（Python 爬虫路径）落盘 Markdown 后自动导入 SQLite；`zhihu_reindex` 全量重扫 `output/`。两条保存路径（`zhihu_save_content` 直写 / 爬虫 Markdown）汇聚同一知识库，`zhihu_local_search` 统一检索。
+- **归档一体化（增量）**：`zhihu_save_*`（Python 爬虫路径）落盘 Markdown 后**增量**导入 SQLite（只扫本次新文件）；`zhihu_reindex` 才做全量重扫 + FTS 物理重建。两条保存路径（`zhihu_save_content` 直写 / 爬虫 Markdown）汇聚同一知识库，`zhihu_local_search` 统一检索。
 - **Embedding 为可插拔接口**：支持 `ZHIHU_EMBEDDING_PROVIDER` 配置；内置 `local-hash` 仅为链路联调的确定性伪向量（非语义 embedding）。未配置真实 provider 时 semantic/hybrid 自动降级 keyword 检索，绝不阻塞启动。
 
 ## Security
 
-- 凭据集中存储于用户目录，POSIX 下 `0600`；`zhihu_auth_status` 只回键名不回值；日志自动脱敏
-- MCP `save_*` 全部 `execFileSync` 数组传参（不经过 shell）+ ID/枚举/整数白名单校验
-- HTTP 模式默认绑定 `127.0.0.1`，显式绑公网会输出显著警告；v1 无远端写操作
+- 凭据集中存储于用户目录，POSIX 下 `0600`；`zhihu_auth_status` 只回键名不回值；日志与登录脚本输出均不打印 Cookie 内容（自动脱敏 + 只显示键名）
+- MCP `save_*` 全部异步 `spawn` 数组传参（不经过 shell、不阻塞 event loop）+ ID/枚举/整数白名单校验
+- HTTP 模式默认绑定 `127.0.0.1`；非回环地址绑定默认**拒绝启动**，确需暴露须显式 `--allow-remote`（风险自担）；v1 无远端写操作
 
 ## 开发
 
@@ -142,4 +142,5 @@ CI：GitHub Actions 三 job——Python 3.11/3.12（ruff+pytest）、Node 20/22�
 
 ## License
 
-MCP 服务器部分（`zhihu-mcp-server/`）继承上游为 AGPL-3.0；其余部分暂未设许可证（如需使用请先开 issue 沟通）。
+- `zhihu-mcp-server/`：AGPL-3.0（继承上游，全文见 [LICENSE](zhihu-mcp-server/LICENSE) 与根目录 [LICENSE](LICENSE)）
+- 其余部分（Python 爬虫，源自 Milloyy/Foxgeek36 的 ZhihuSpider）：上游未声明许可证，本项目沿用同样口径——暂未设许可证，如需使用请先开 issue 沟通

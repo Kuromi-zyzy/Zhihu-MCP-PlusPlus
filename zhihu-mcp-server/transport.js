@@ -26,7 +26,17 @@ function cookieHeader() {
 const RETRYABLE = ['upstream_timeout', 'network_error'];
 
 async function fetchOnce(url, headers, timeoutMs) {
-  const resp = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  let resp;
+  try {
+    resp = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (e) {
+    // 原始网络异常统一转 envelope，否则 retry 层看不到 retryable code（ AbortError/TypeError/ECONNRESET）
+    const name = e?.name || '';
+    if (name === 'AbortError' || name === 'TimeoutError' || /timed?\s?out/i.test(String(e?.message))) {
+      throw new EnvelopeError('upstream_timeout', `请求超时（${timeoutMs}ms）: ${url.slice(0, 120)}`);
+    }
+    throw new EnvelopeError('network_error', `网络错误: ${String(e?.message || e).slice(0, 160)}`);
+  }
   if (resp.ok) return resp.json();
   const code = codeFromHttpStatus(resp.status);
   throw new EnvelopeError(code, `HTTP ${resp.status}: ${resp.statusText}`);

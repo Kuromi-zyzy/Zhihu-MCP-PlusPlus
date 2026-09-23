@@ -91,7 +91,7 @@ def sync_credentials_store(cookie_str: str, user_name: str):
                     pass  # 损坏则重建
         store.setdefault("version", 1)
         store["cookies"] = pairs
-        store["user"] = user_name
+        store["user"] = {"id": None, "name": user_name} if user_name else None
         store["validated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         store["updated_at"] = store["validated_at"]
         os.makedirs(os.path.dirname(CRED_STORE), exist_ok=True)
@@ -156,7 +156,7 @@ def capture_cookie(headless: bool = False) -> str:
         cookie_str = "; ".join(pairs)
         if cookie_str:
             print(f"  ✓ Cookie 捕获成功！({len(pairs)} 项)")
-            print(f"  📋 预览: {cookie_str[:50]}...")
+            print(f"  📋 键名: {', '.join(sorted(seen))}")
             if "z_c0" not in cookie_str:
                 print("  ✗ 捕获结果异常（无 z_c0），视为未登录")
                 cookie_str = ""

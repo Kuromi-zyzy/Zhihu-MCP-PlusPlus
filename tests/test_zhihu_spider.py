@@ -78,3 +78,23 @@ class TestProgress:
         _save_progress(d, {"1"})
         _save_progress(d, {"1", "2"})
         assert _load_progress(d) == {"1", "2"}
+
+
+def test_browser_answer_md_url_points_to_answer(tmp_path):
+    """rc3 回归：浏览器兜底回答的 front matter URL 必须定位到回答本身，
+    否则 ingest 会把同一问题下多个回答全部归类成 question:<qid> 并互相覆盖。"""
+    import zhihu_spider as zs
+
+    data = {"id": "6300000000000000001", "question_id": "123456",
+            "question_title": "测试问题", "author": "张三", "voteup": "5",
+            "content": "<p>回答正文</p>"}
+    fp = zs.save_browser_answer_md(data, str(tmp_path))
+    text = open(fp, encoding="utf-8").read()
+    assert "/answer/6300000000000000001" in text, text[:200]
+    assert "/question/123456/answer/6300000000000000001" in text
+
+    # 无 question_id 时回退 /answer/<aid>
+    data2 = {"id": "6300000000000000002", "question_id": "", "content": "<p>x</p>"}
+    fp2 = zs.save_browser_answer_md(data2, str(tmp_path))
+    text2 = open(fp2, encoding="utf-8").read()
+    assert "url: https://www.zhihu.com/answer/6300000000000000002" in text2

@@ -34,6 +34,9 @@ function resolveZhihuUrl(input) {
       ? { type: 'answer', id: m[2], question_id: m[1], canonical_url: `https://www.zhihu.com/question/${m[1]}/answer/${m[2]}` }
       : { type: 'question', id: m[1], canonical_url: `https://www.zhihu.com/question/${m[1]}` };
   }
+  // 裸回答 URL（无问题上下文）：zhihu_spider 浏览器回退与分享链接会出现此形态
+  m = p.match(/\/answer\/(\d+)/);
+  if (m) return { type: 'answer', id: m[1], question_id: null, canonical_url: null };
   m = p.match(/\/pin\/(\d+)/);
   if (m) return { type: 'pin', id: m[1], canonical_url: `https://www.zhihu.com/pin/${m[1]}` };
   // tardis/bd、tardis/zm 是知乎给搜索引擎的文章镜像页，数字 ID 与专栏文章一致

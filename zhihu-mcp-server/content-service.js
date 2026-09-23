@@ -173,7 +173,8 @@ export async function fetchAnswers(questionId, { limit = 20, offset = 0, sort = 
   return {
     items,
     next_cursor: data.paging?.next ? String(offset + items.length) : null,
-    has_more: !data.paging?.is_end
+    // paging 缺失时按满页判断；注意 !undefined === true，不能直接写 !data.paging?.is_end
+    has_more: data.paging ? !data.paging.is_end : items.length >= limit
   };
 }
 
@@ -250,5 +251,5 @@ export async function listReplies({ comment_id, limit = 10, cursor = 0 }) {
   const { data } = await zhihuAndroidRequest(`https://api.zhihu.com/comments/${comment_id}/child_comments?limit=${lim}&offset=${off}`);
   const arr = Array.isArray(data) ? data : (data.data || []);
   const items = arr.map(normalizeComment);
-  return { items, next_cursor: data.paging?.next ? String(off + lim) : null, has_more: !data.paging?.is_end ?? items.length === lim };
+  return { items, next_cursor: data.paging?.next ? String(off + lim) : null, has_more: data.paging ? !data.paging.is_end : items.length === lim };
 }

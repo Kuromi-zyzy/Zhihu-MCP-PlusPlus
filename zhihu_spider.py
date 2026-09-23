@@ -90,7 +90,13 @@ def save_browser_answer_md(answer_data, output_dir):
         "title": answer_data.get("question_title", ""),
         "author": answer_data.get("author", ""),
         "voteup": voteup,
-        "url": f"https://www.zhihu.com/question/{answer_data.get('question_id', '')}",
+        # URL 必须定位到回答本身（/question/<qid>/answer/<aid>），否则 ingest 会把
+        # 同一问题下的多个回答全部归类成 question:<qid> 并互相覆盖
+        "url": (
+            f"https://www.zhihu.com/question/{answer_data.get('question_id', '')}/answer/{answer_id}"
+            if answer_data.get("question_id") and answer_id
+            else f"https://www.zhihu.com/answer/{answer_id}" if answer_id else ""
+        ),
     }, content_md)
     print(f"  ✓ 已保存: {filename}")
     return filepath

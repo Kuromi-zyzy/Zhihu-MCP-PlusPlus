@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.0.0-rc3 (2026-09-23)
+
+第二轮外部审查修复（2 个 P0 硬 bug + 主链正确性 + 发布工程）：
+
+### Fixed（P0）
+- `zhihu_auth_import` 漏 `await`：`validateCookieString` 是 async，无 await 时正常 Cookie 也被判 `not_authenticated`——导入功能此前实际不可用；handler 级测试锁死（变异验证：撤掉 await 测试即红）
+- `save_browser_answer_md` 把回答 URL 写成问题页 → ingest 按类型推断会把同一问题下多个回答归并成 `question:<qid>` 互相覆盖；改写 `/question/<qid>/answer/<aid>`（无 qid 时回退 `/answer/<aid>`），pytest 回归锁死
+
+### Fixed（正确性）
+- `ingest.js` 删自造 URL 正则，复用 `url-resolver.js` 的 `resolveZhihuUrl`（`new URL` + zhihu.com 域名硬校验）——站外 URL（如 `evil.example/question/123/answer/456`）不再可能伪装入库；`url-resolver` 补裸 `/answer/<id>` 分支
+- `transport.fetchOnce` 把原始网络异常（AbortError/TypeError/ECONNRESET）归一为 `upstream_timeout`/`network_error` envelope——修复前 retry 层看不到 retryable code，**超时/网络重试实际从未生效**；mock fetch 测试验证 3 次调用
+- Search Router 最终排序先剥离 `source` 再算分 → 来源置信度（zhihu 0.9/web 0.7/local 0.95）实际全部落到 0.5；改为先排序后剥离
+- `listReplies`/`fetchAnswers` 的 `has_more` 表达式错误（`!undefined ?? x` 永真、后半段死代码）
+- CI security 检查的 `|| true` 会在发现违规时吞掉退出码 → 改为显式 `exit 1`
+
+### Changed
+- **异步化**：`execFileSync` 全部替换为异步 `spawn`（`runPythonAsync`/`browserLogin`）——HTTP 模式下 6 分钟的扫码登录或 3 分钟的收藏夹爬取不再冻结 event loop（`/healthz` 等并发请求照常响应）
+- **增量归档**：`zhihu_save_*` 后只导入本次落盘的文件（mtime > 保存开始时刻），`zhihu_reindex` 才做全量重扫——归档增长后保存成本恒定
+- HTTP 非回环地址绑定从"警告"改为**默认拒绝启动**（显式 `--allow-remote` 才放行）
+- Cookie 导入语义改为整体替换（`replace: true`），换账号不残留旧键；`user` 字段统一为 `{id, name}` 对象 schema（`normalizeUser`）
+- `login.py` 不再打印 Cookie 前 50 字符预览（只显示键名）——对齐"Cookie 不进日志"声明
+
+### Release engineering
+- 版本单源化：`index.js` 从 package.json 读版本（不再硬编码）；package.json/pyproject 对齐 `1.0.0-rc3`
+- 补 `LICENSE`（AGPL-3.0 全文，根目录与 zhihu-mcp-server/ 各一份）；README License 段写明 Python 爬虫上游授权边界
+- GitHub 仓库 description 更新为 27 工具
+- 测试：node 37→48（transport 归一+retry 计数/ingest 站外拒绝+增量/credentials replace+schema/handler 级 auth 链路），pytest 51→52（浏览器回答 URL）
+
 ## v1.0.0-rc2 (2026-09-23)
 
 发布验收修复（外部验收意见 → 收口）：

@@ -2,10 +2,12 @@
 // 导入 SQLite contents，使 zhihu_save_*（Python 路径）与 zhihu_save_content（SQLite 路径）
 // 产出汇聚到同一知识库，zhihu_local_search 可统一检索。
 // front matter 字段由 zhihu_spider._write_md 的各调用点决定：title/author/voteup/url(/created)。
+// URL 分类复用 url-resolver.js 的 resolveZhihuUrl（new URL + zhihu.com 域名硬校验），不另设第二套正则。
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { upsertContent } from './storage.js';
+import { resolveZhihuUrl } from './url-resolver.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,24 +16,11 @@ function outputDir() {
   return process.env.ZHIHU_OUTPUT_DIR || path.resolve(__dirname, '..', 'output');
 }
 
-// url → { type, id, question_id }。爬虫产出的 url 形态（zhihu_spider.py 各 _write_md 调用点）：
-//   answer:   https://www.zhihu.com/question/<qid>/answer/<aid> | https://www.zhihu.com/answer/<aid>
-//   article:  https://zhuanlan.zhihu.com/p/<id>
-//   pin:      https://www.zhihu.com/pin/<id>
-//   question: https://www.zhihu.com/question/<qid>（浏览器回退模式）
+// url → { type, id, question_id }。非知乎域名/不可识别 URL 一律 null（resolveZhihuUrl 内部做域名硬校验）
 function classifyUrl(url) {
-  const u = String(url || '');
-  let m = u.match(/\/question\/(\d+)\/answer\/(\d+)/);
-  if (m) return { type: 'answer', id: m[2], question_id: m[1] };
-  m = u.match(/\/answer\/(\d+)/);
-  if (m) return { type: 'answer', id: m[1], question_id: null };
-  m = u.match(/zhuanlan\.zhihu\.com\/p\/(\d+)/) || u.match(/\/p\/(\d+)/);
-  if (m) return { type: 'article', id: m[1], question_id: null };
-  m = u.match(/\/pin\/(\d+)/);
-  if (m) return { type: 'pin', id: m[1], question_id: null };
-  m = u.match(/\/question\/(\d+)/);
-  if (m) return { type: 'question', id: m[1], question_id: m[1] };
-  return null;
+  const r = resolveZhihuUrl(url);
+  if (!r) return null;
+  return { type: r.type, id: r.id, question_id: r.question_id ?? null };
 }
 
 // 解析单个 Markdown 文件 → upsertContent 入参；无 front matter 或 URL 不可识别返回 null
@@ -53,13 +42,15 @@ export function parseMarkdownFile(filepath) {
   const classified = classifyUrl(meta.url);
   if (!classified || !/^\d+$/.test(classified.id)) return null;
   const body = text.slice(m[0].length).trim();
+  // question 类型时 question_id 与自身 id 相同（ingest 契约：过滤/关联字段不为空）
+  const questionId = classified.type === 'question' ? classified.id : classified.question_id;
   return {
     content_type: classified.type,
     content_id: classified.id,
     title: meta.title || '',
     author: meta.author || '',
     url: meta.url || '',
-    question_id: classified.question_id,
+    question_id: questionId,
     voteup_count: parseInt(meta.voteup, 10) || 0,
     created_at: meta.created || null,
     content: body,
@@ -67,8 +58,10 @@ export function parseMarkdownFile(filepath) {
   };
 }
 
-// 扫描 output/ 全部 *.md 并导入。返回 { scanned, inserted, updated, unchanged, skipped, output_dir }
-export function importOutputMarkdown() {
+// 扫描 output/ 下 *.md 并导入。since（ms 时间戳）给定时只处理 mtime 晚于它的文件——
+// zhihu_save_* 用增量（保存开始时间），zhihu_reindex 不传即全量。
+// 返回 { scanned, inserted, updated, unchanged, skipped, output_dir }
+export function importOutputMarkdown({ since = 0 } = {}) {
   const dir = outputDir();
   const stats = { scanned: 0, inserted: 0, updated: 0, unchanged: 0, skipped: 0, output_dir: dir };
   if (!fs.existsSync(dir)) return stats;
@@ -84,6 +77,11 @@ export function importOutputMarkdown() {
       const full = path.join(d, e.name);
       if (e.isDirectory()) walk(full);
       else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) {
+        if (since) {
+          try {
+            if (fs.statSync(full).mtimeMs <= since) continue;
+          } catch { continue; }
+        }
         stats.scanned++;
         const item = parseMarkdownFile(full);
         if (!item) { stats.skipped++; continue; }

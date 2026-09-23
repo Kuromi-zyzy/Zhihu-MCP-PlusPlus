@@ -13,7 +13,6 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { createServer } from 'http';
-import { execFileSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -40,7 +39,8 @@ import { cacheGet, cacheSet } from './cache.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SPIDER_DIR = path.resolve(__dirname, '..');
-const VERSION = '1.0.0';
+// 版本单源 = package.json（不再双写硬编码）
+const { version: VERSION } = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
 
 // ============ save_* 入参校验与安全执行（防命令注入） ============
 function requireValidId(value, name) {
@@ -68,19 +68,36 @@ function requireOptionalInt(value, name, { min = 1, max = 1000 } = {}) {
   return n;
 }
 
-function runSpider(spiderArgs, timeoutMs) {
-  try {
-    return execFileSync('python', ['main.py', ...spiderArgs], {
-      cwd: SPIDER_DIR,
-      encoding: 'utf8',
-      timeout: timeoutMs,
-      windowsHide: true
+// 异步执行 python 子进程：HTTP 模式下不能阻塞 event loop（execFileSync 会冻结 /healthz 等所有并发请求）
+async function runPythonAsync(args, { timeoutMs, cwd = SPIDER_DIR } = {}) {
+  const { spawn } = await import('child_process');
+  return new Promise((resolve, reject) => {
+    const child = spawn('python', args, { cwd, windowsHide: true });
+    let stdout = '', stderr = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new EnvelopeError('upstream_timeout', `python 子进程超时（${timeoutMs}ms）: ${args.join(' ').slice(0, 120)}`));
+    }, timeoutMs);
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', (e) => { clearTimeout(timer); reject(new EnvelopeError('browser_error', `python 启动失败: ${e.message}`)); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) return resolve(stdout);
+      const detail = (stdout + '\n' + stderr).trim();
+      reject(new Error(`爬虫执行失败（${code}）${detail ? ':\n' + detail.slice(-1500) : ''}`));
     });
+  });
+}
+
+async function runSpiderAsync(spiderArgs, timeoutMs) {
+  try {
+    return await runPythonAsync(['main.py', ...spiderArgs], { timeoutMs });
   } catch (e) {
-    const stdout = typeof e.stdout === 'string' ? e.stdout : '';
-    const stderr = typeof e.stderr === 'string' ? e.stderr : '';
-    const detail = (stdout + '\n' + stderr).trim();
-    throw new Error(`爬虫执行失败（${e.signal || e.status || e.code || 'unknown'}）${detail ? ':\n' + detail.slice(-1500) : ''}`);
+    // runPythonAsync 的超时/启动失败已带 envelope 信息；close!=0 的普通 Error 透传详情
+    const detail = (typeof e.stdout === 'string' ? e.stdout : '') + '\n' + (typeof e.stderr === 'string' ? e.stderr : '');
+    const tail = detail.trim() || String(e?.message || '').slice(-1500);
+    throw new Error(`爬虫执行失败（${e.signal || e.status || e.code || 'unknown'}）:\n${tail.slice(-1500)}`);
   }
 }
 
@@ -436,24 +453,28 @@ async function handleTool(name, args, startedAt) {
       const spiderArgs = ['question', qid, '--sort', requireEnum(args.sort, 'sort', ['default', 'voteups', 'created'], 'default')];
       const pages = requireOptionalInt(args.max_pages, 'max_pages', { min: 1, max: 500 });
       if (pages !== undefined) spiderArgs.push('--max-pages', String(pages));
-      const output = runSpider(spiderArgs, 120000);
-      // Markdown → SQLite 一体化：爬虫落盘后同步进本地知识库（SHA-256 去重，可安全重扫）
-      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown() });
+      const t0 = Date.now();
+      const output = await runSpiderAsync(spiderArgs, 120000);
+      // Markdown → SQLite 一体化：增量导入本次保存落盘的文件（mtime > t0），不重扫全库
+      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown({ since: t0 }) });
     }
     case 'zhihu_save_answer': {
-      const output = runSpider(['answer', requireValidId(args.answer_id, 'answer_id')], 60000);
-      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown() });
+      const t0 = Date.now();
+      const output = await runSpiderAsync(['answer', requireValidId(args.answer_id, 'answer_id')], 60000);
+      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown({ since: t0 }) });
     }
     case 'zhihu_save_article': {
-      const output = runSpider(['article', requireValidId(args.article_id, 'article_id')], 60000);
-      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown() });
+      const t0 = Date.now();
+      const output = await runSpiderAsync(['article', requireValidId(args.article_id, 'article_id')], 60000);
+      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown({ since: t0 }) });
     }
     case 'zhihu_save_collection': {
       const spiderArgs = ['collection', requireValidId(args.collection_id, 'collection_id')];
       const pages = requireOptionalInt(args.max_pages, 'max_pages', { min: 1, max: 500 });
       if (pages !== undefined) spiderArgs.push('--max-pages', String(pages));
-      const output = runSpider(spiderArgs, 180000);
-      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown() });
+      const t0 = Date.now();
+      const output = await runSpiderAsync(spiderArgs, 180000);
+      return ok({ output: output.slice(-1500), knowledge_base: importOutputMarkdown({ since: t0 }) });
     }
     case 'zhihu_save_pin': {
       const pid = requireValidId(args.pin_id, 'pin_id');
@@ -512,11 +533,12 @@ async function handleTool(name, args, startedAt) {
     case 'zhihu_auth_import': {
       const cookies = args.cookies || {};
       if (!cookies.d_c0) return fail('invalid_input', '至少需要 d_c0');
-      // 验证后再入库
+      // 验证后再入库（validateCookieString 是 async，漏 await 会让正常 Cookie 也判失败）
       const cookieStr = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
-      const result = validateCookieString(cookieStr);
+      const result = await validateCookieString(cookieStr);
       if (!result.ok) return fail('not_authenticated', `Cookie 验证失败: ${result.info}（未写入凭据库）`);
-      setCookies(cookies, { user: result.user, validated_at: new Date().toISOString() });
+      // 导入一套新登录态 = 整体替换，避免换账号后旧 Cookie 键残留
+      setCookies(cookies, { user: result.user, validated_at: new Date().toISOString(), replace: true });
       return ok({ imported: Object.keys(cookies), user: result.user });
     }
     case 'zhihu_auth_logout': {
@@ -652,8 +674,11 @@ async function main() {
   };
   const hostArg = getArg('--host', '127.0.0.1');
   const portArg = Number(getArg('--port', '8635'));
-  if (hostArg !== '127.0.0.1' && hostArg !== 'localhost') {
-    console.error(`[WARN] HTTP 绑定到非回环地址 ${hostArg}：服务无身份认证，公网暴露有风险！`);
+  if (hostArg !== '127.0.0.1' && hostArg !== 'localhost' && !process.argv.includes('--allow-remote')) {
+    // 服务无身份认证，非回环绑定默认拒绝；确需暴露时显式 --allow-remote 自担风险
+    console.error(`[REFUSED] --host ${hostArg} 是非回环地址且服务无身份认证。`);
+    console.error('如确认要暴露到网络，请加 --allow-remote 重新启动（风险自担）。');
+    process.exit(1);
   }
 
   // SDK 1.29 stateless 模式（sessionIdGenerator: undefined）要求每请求一个全新
@@ -701,7 +726,14 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  console.error('Server error:', error);
-  process.exit(1);
-});
+// 仅直接执行时启动服务；被测试 import（带 ?case= 查询串）时不启动，以便对 handleTool 做单元测试
+const invokedDirectly = !import.meta.url.includes('?') &&
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  main().catch((error) => {
+    console.error('Server error:', error);
+    process.exit(1);
+  });
+}
+
+export { handleTool, TOOLS, VERSION };

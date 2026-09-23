@@ -106,10 +106,19 @@ function getCookies() {
   return loadStore().cookies || {};
 }
 
-function setCookies(cookies, { user = undefined, validated_at = undefined } = {}) {
+// user 统一 schema：{id, name} | null（不接受裸字符串，避免两种结构并存）
+function normalizeUser(user) {
+  if (user == null) return null;
+  if (typeof user === 'string') return { id: null, name: user };
+  if (typeof user === 'object' && (user.name || user.id)) return { id: user.id ?? null, name: user.name ?? '' };
+  return null;
+}
+
+function setCookies(cookies, { user = undefined, validated_at = undefined, replace = false } = {}) {
   const store = loadStore();
-  store.cookies = { ...store.cookies, ...cookies };
-  if (user !== undefined) store.user = user;
+  // replace=true 用于导入整套新登录态：整体替换，防止换账号后旧 Cookie 键残留
+  store.cookies = replace ? { ...cookies } : { ...store.cookies, ...cookies };
+  if (user !== undefined) store.user = normalizeUser(user);
   if (validated_at !== undefined) store.validated_at = validated_at;
   saveStore(store);
   return store;
@@ -123,4 +132,4 @@ function clearAuth() {
   saveStore(store);
 }
 
-export { CRED_DIR, CRED_FILE, loadStore, saveStore, getCookies, setCookies, clearAuth };
+export { CRED_DIR, CRED_FILE, loadStore, saveStore, getCookies, setCookies, clearAuth, normalizeUser };

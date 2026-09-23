@@ -1,6 +1,6 @@
 {
   "name": "zhihu-mcp-server",
-  "version": "1.0.0-rc2",
+  "version": "1.0.0-rc3",
   "description": "Zhihu MCP++ — 知乎检索、阅读、研究、归档与本地知识库 MCP 后端",
   "main": "index.js",
   "type": "module",

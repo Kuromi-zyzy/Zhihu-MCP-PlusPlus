@@ -64,6 +64,11 @@ jobs:
           echo "no sensitive files tracked"
       - name: No shell-string execution in MCP
         run: |
-          ! grep -n "execSync(" zhihu-mcp-server/index.js zhihu-mcp-server/*.js zhihu-mcp-server/search/*.js 2>/dev/null | grep -v "历史\|//" || true
+          # 违规必须 exit 1：execSync 字符串执行不允许回归
+          if grep -rn "execSync(" zhihu-mcp-server/ --include="*.js" | grep -v node_modules; then
+            echo "::error::execSync found in MCP server — shell-string execution must not return"
+            exit 1
+          fi
+          test -f zhihu-mcp-server/index.js
           grep -q "execFileSync" zhihu-mcp-server/index.js
           echo "shell-execution boundary OK"

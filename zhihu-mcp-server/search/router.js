@@ -162,9 +162,11 @@ export async function routeSearch({ query, source = 'auto', limit = 10 }) {
       byKey.set(key, { ...it, all_sources: [it.source] });
     }
   }
-  const merged = [...byKey.values()]
-    .map(({ source, ...rest }) => ({ ...rest }))
+  // 排序先于剥离 source：scoreItem 依赖 item.source 查 SOURCE_CONFIDENCE，
+  // 先删 source 会让所有条目置信度落到 0.5 默认值，来源权重失效。
+  const ranked = [...byKey.values()]
     .sort((a, b) => scoreItem(b, q) - scoreItem(a, q))
-    .slice(0, lim);
-  return { items: merged, sources: sourcesUsed, total: merged.length };
+    .slice(0, lim)
+    .map(({ source, ...rest }) => rest);
+  return { items: ranked, sources: sourcesUsed, total: ranked.length };
 }
