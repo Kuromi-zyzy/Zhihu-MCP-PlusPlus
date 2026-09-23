@@ -1,3 +1,21 @@
-*.js linguist-language=python
-*.css linguist-language=python
-*.html linguist-language=python
+# 语言统计：如实呈现（Python 爬虫 + JavaScript MCP 服务器），不做 linguist 伪装
+
+# Windows 脚本保持 CRLF（记事本/批处理兼容）
+*.bat text eol=crlf
+
+# 源码与配置统一 LF（跨 Python/Node 双侧一致，避免 WSL/Windows 混合开发行尾漂移）
+*.py text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.ico binary
+*.sqlite binary
