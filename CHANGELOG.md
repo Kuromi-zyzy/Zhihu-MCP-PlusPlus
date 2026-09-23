@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.0-rc5 (2026-09-23)
+
+stable 前最后收口（第四轮验收：rc4 主功能 PASS，凭据单一来源为最后阻塞项）：
+
+### Changed
+- **凭据单一来源**：`login.py` 删除 config.json 写入路径（`save_config`/`load_config` 移除），`write_credentials_store` 为唯一写入点（写失败即报错，不静默）；`CRED_DIR` 读 `ZHIHU_MCP_DATA_DIR`（Python/Node 同语义）；`main.py` cookie 优先级=统一凭据库 > legacy config 兜底；`browserLogin` 直 `validateCurrent` 不再回读 config.json；`credentials.js` 隔离目录下所有 legacy 迁移全禁（含 spider config.json）
+- **package-lock.json** 对齐 rc4→rc5（兑现三处一致声明）
+- **CI whitespace 真闸门**：`fetch-depth: 2` + `git diff --check HEAD~1 HEAD` 违规即 exit 1（原 shallow 单提交下静默跳过=假绿）
+
+### Tests
+- pytest 52→54：`test_login_single_source_of_truth`（save_config 已删/DATA_DIR 语义/唯一写入点/legacy 绝不写）、`test_main_py_reads_credentials_store_first`；旧写盘闸门断言改新契约
+
 ## v1.0.0-rc4 (2026-09-23)
 
 第三轮验收修复（P0 凭据隔离 + P1 本地检索 ID + 发布元数据收口）：

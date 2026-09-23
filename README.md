@@ -1,4 +1,4 @@
-# 知乎 MCP++ v1.0.0-rc4
+# 知乎 MCP++ v1.0.0-rc5
 
 <p align="left">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
