@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.0-rc4 (2026-09-23)
+
+第三轮验收修复（P0 凭据隔离 + P1 本地检索 ID + 发布元数据收口）：
+
+### Fixed（P0）
+- **测试污染真实凭据库**：`credentials.js` 硬编码 `~/.zhihu-mcp`，不读 `ZHIHU_MCP_DATA_DIR`——测试的 mock Cookie 曾直接覆盖真实登录态（CI 干净 runner 出现 `logged_in=true` 即直接证据）。现与 storage/cache 统一数据目录语义：`ZHIHU_MCP_DATA_DIR` 优先，隔离目录下不做 legacy 迁移；smoke 改跑隔离目录并硬断言 `logged_in=false`；两个测试文件增加进程退出守卫（真实 credentials.json 哈希变化即 FATAL 并自动回滚）。本机真实凭据已从 legacy config 恢复并验证有效。
+
+### Fixed（P1）
+- **本地检索 ID 带复合前缀**：storage 主键 `answer:123456` 泄漏到 MCP 结果——`zhihu_search` 本地源返回 `id: "answer:123456"`，接 `zhihu_get_content` 必然 404，三源去重也无法与远端合并。`searchLocalSource` 现还原纯数字 ID；router 单测锁定 ID 纯数字、去重键对齐、置信度排序真实生效（`scoreItem`/`searchLocalSource` 已导出可测）。
+- `runSpiderAsync` 不再把 `runPythonAsync` 的 envelope（`upstream_timeout`/`browser_error`）降级成普通 Error。
+
+### Changed（发布工程）
+- CI 安全断言修正：`grep execFileSync` 依赖注释文本才能通过（"文学鉴赏"）→ 改为禁止 `execSync(`/`execFileSync(` 出现 + 要求异步 `spawn` 存在
+- `package-lock.json` 版本与 package.json 对齐；README 标题/测试数字（52+52）/CI 矩阵（Node 22/24）同步 rc4 现状
+- 根 LICENSE 加适用范围声明（仅覆盖 zhihu-mcp-server/），消除"GitHub 显示整仓 AGPL vs README 写爬虫部分未设许可"的口径冲突
+- 测试：node 48→52（router 4 项）
+
 ## v1.0.0-rc3 (2026-09-23)
 
 第二轮外部审查修复（2 个 P0 硬 bug + 主链正确性 + 发布工程）：

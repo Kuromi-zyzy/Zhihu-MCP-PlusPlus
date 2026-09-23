@@ -1,5 +1,7 @@
 // 统一 Credential Store（v1 §3）
-// 所有登录态集中到 ~/.zhihu-mcp/credentials.json，Python 与 Node 共用。
+// 所有登录态集中到 <data-dir>/credentials.json，Python 与 Node 共用。
+// 数据目录语义与 storage.js/cache.js 一致：ZHIHU_MCP_DATA_DIR 覆盖（测试隔离靠它，
+// 绝不能让测试写真实 ~/.zhihu-mcp），默认 ~/.zhihu-mcp。
 // 旧 config.json / ~/.zhihu-mcp/config.json 只读迁移，不再写入。
 // 文件权限：POSIX 尽量 0600；Windows 依赖用户私有目录（%USERPROFILE%）。
 import fs from 'fs';
@@ -9,10 +11,10 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const CRED_DIR = path.join(os.homedir(), '.zhihu-mcp');
+const CRED_DIR = process.env.ZHIHU_MCP_DATA_DIR || path.join(os.homedir(), '.zhihu-mcp');
 const CRED_FILE = path.join(CRED_DIR, 'credentials.json');
-// 兼容迁移源（只读）
-const LEGACY_MCP_CONFIG = path.join(CRED_DIR, 'config.json');
+// 兼容迁移源（只读）；默认目录下才找 legacy config，隔离目录不迁移
+const LEGACY_MCP_CONFIG = process.env.ZHIHU_MCP_DATA_DIR ? null : path.join(CRED_DIR, 'config.json');
 
 function ensureDir() {
   if (!fs.existsSync(CRED_DIR)) fs.mkdirSync(CRED_DIR, { recursive: true });
@@ -28,8 +30,8 @@ function applyFilePerms() {
 }
 
 function migrateLegacy() {
-  // 迁移源 1：~/.zhihu-mcp/config.json（MCP 旧 cookies 字段）
-  if (fs.existsSync(LEGACY_MCP_CONFIG)) {
+  // 迁移源 1：~/.zhihu-mcp/config.json（MCP 旧 cookies 字段）；隔离目录（测试）不迁移
+  if (LEGACY_MCP_CONFIG && fs.existsSync(LEGACY_MCP_CONFIG)) {
     try {
       const legacy = JSON.parse(fs.readFileSync(LEGACY_MCP_CONFIG, 'utf8'));
       if (legacy.cookies && Object.keys(legacy.cookies).length) {

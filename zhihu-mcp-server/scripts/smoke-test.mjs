@@ -12,7 +12,12 @@ const add = (name, pass, note = '') => {
   console.log(`${pass ? '✓' : '✗'} ${name}${note ? ' — ' + note : ''}`);
 };
 
-const proc = spawn('node', [path.join(__dirname, '..', 'index.js')], { stdio: ['pipe', 'pipe', 'pipe'] });
+const proc = spawn('node', [path.join(__dirname, '..', 'index.js')], {
+  stdio: ['pipe', 'pipe', 'pipe'],
+  // smoke 必须跑在隔离数据目录：不读真实凭据库、不写真实凭据库（rc3 曾因此让
+  // CI runner "logged_in=true"、本地 npm test 覆盖真实 Cookie——P0 级污染）
+  env: { ...process.env, ZHIHU_MCP_DATA_DIR: process.env.ZHIHU_MCP_DATA_DIR || path.join(process.env.TEMP || '/tmp', `zhmcp_smoke_${process.pid}`) }
+});
 let buf = '';
 proc.stdout.on('data', d => { buf += d.toString(); });
 function send(obj) {
@@ -42,7 +47,9 @@ try {
   };
 
   const a = await call(10, 'zhihu_auth_status', {});
-  add('auth status', a.ok === true, a.ok ? `logged_in=${a.data?.logged_in}` : `error=${a.error?.code}: ${String(a.error?.message).slice(0, 120)}`);
+  // 隔离目录下必须是未登录态：若为 true 说明凭据隔离被破坏（测试/迁移污染）——硬失败
+  add('auth status (fresh, not logged in)', a.ok === true && a.data?.logged_in === false,
+    a.ok ? `logged_in=${a.data?.logged_in}` : `error=${a.error?.code}: ${String(a.error?.message).slice(0, 120)}`);
 
   const r = await call(11, 'zhihu_resolve_url', { url: 'https://www.zhihu.com/question/123/answer/456' });
   add('resolve url', r.ok === true && r.data?.type === 'answer');

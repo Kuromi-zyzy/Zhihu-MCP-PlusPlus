@@ -1,3 +1,10 @@
+本许可证仅适用于 zhihu-mcp-server/ 目录（MCP 服务器部分，AGPL-3.0，继承上游）。
+
+仓库其余部分（Python 爬虫，源自 Milloyy/Foxgeek36 的 ZhihuSpider，上游未声明许可证）
+不在本许可证覆盖范围内，授权口径见 README「License」一节：暂未设许可证，如需使用请先开 issue 沟通。
+
+===========================================================================
+
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 

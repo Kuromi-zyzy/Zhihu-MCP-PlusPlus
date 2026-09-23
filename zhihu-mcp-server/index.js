@@ -94,7 +94,9 @@ async function runSpiderAsync(spiderArgs, timeoutMs) {
   try {
     return await runPythonAsync(['main.py', ...spiderArgs], { timeoutMs });
   } catch (e) {
-    // runPythonAsync 的超时/启动失败已带 envelope 信息；close!=0 的普通 Error 透传详情
+    // runPythonAsync 的超时/启动失败已带 envelope（upstream_timeout/browser_error）——原样透传，
+    // 不降级成普通 Error（否则错误码归一前功尽弃，客户端只见 internal_error）
+    if (e?.__envelope) throw e;
     const detail = (typeof e.stdout === 'string' ? e.stdout : '') + '\n' + (typeof e.stderr === 'string' ? e.stderr : '');
     const tail = detail.trim() || String(e?.message || '').slice(-1500);
     throw new Error(`爬虫执行失败（${e.signal || e.status || e.code || 'unknown'}）:\n${tail.slice(-1500)}`);

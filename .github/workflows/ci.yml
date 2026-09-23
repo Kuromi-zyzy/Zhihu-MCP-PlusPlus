@@ -64,11 +64,11 @@ jobs:
           echo "no sensitive files tracked"
       - name: No shell-string execution in MCP
         run: |
-          # 违规必须 exit 1：execSync 字符串执行不允许回归
-          if grep -rn "execSync(" zhihu-mcp-server/ --include="*.js" | grep -v node_modules; then
-            echo "::error::execSync found in MCP server — shell-string execution must not return"
+          # 违规必须 exit 1：同步子进程（冻结 event loop）与 shell 串执行都不允许回归
+          if grep -rEn "execSync\(|execFileSync\(" zhihu-mcp-server/ --include="*.js" | grep -v node_modules; then
+            echo "::error::sync child-process API found — use async spawn only"
             exit 1
           fi
           test -f zhihu-mcp-server/index.js
-          grep -q "execFileSync" zhihu-mcp-server/index.js
-          echo "shell-execution boundary OK"
+          grep -q "spawn(" zhihu-mcp-server/index.js
+          echo "async-spawn boundary OK"

@@ -93,17 +93,27 @@ async function searchBingSource(query, limit) {
 
 function searchLocalSource(query, limit) {
   const res = localSearch({ keyword: query, limit });
-  return res.items.map(it => ({
-    type: it.content_type,
-    id: it.content_id,
-    title: it.title || '',
-    excerpt: it.excerpt || '',
-    url: it.url || '',
-    voteup_count: it.voteup_count,
-    author: it.author || '',
-    source: 'local'
-  }));
+  return res.items.map(it => {
+    // storage 主键是复合形态 `answer:123456`；对客户端/去重边界必须还原纯数字 ID，
+    // 否则 zhihu_get_content 拿到 `answer:answer:123456`，三源去重也无法与远端合并
+    const prefix = `${it.content_type}:`;
+    const rawId = String(it.content_id || '').startsWith(prefix)
+      ? String(it.content_id).slice(prefix.length)
+      : String(it.content_id || '');
+    return {
+      type: it.content_type,
+      id: rawId,
+      title: it.title || '',
+      excerpt: it.excerpt || '',
+      url: it.url || '',
+      voteup_count: it.voteup_count,
+      author: it.author || '',
+      source: 'local'
+    };
+  });
 }
+
+export { searchLocalSource, scoreItem };
 
 // 主入口：source = auto | zhihu | web | local
 export async function routeSearch({ query, source = 'auto', limit = 10 }) {

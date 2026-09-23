@@ -1,4 +1,4 @@
-# 知乎 MCP++ v1.0
+# 知乎 MCP++ v1.0.0-rc4
 
 <p align="left">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
@@ -113,13 +113,13 @@ Python 侧（爬虫）：`crawler.py` 真三层递进（签名 Web API → 无�
 ## 开发
 
 ```bash
-python -m pytest -q                       # Python 侧 51 测试
+python -m pytest -q                       # Python 侧 52 测试
 cd zhihu-mcp-server
-npm test                                  # Node 侧 32 测试
-node scripts/smoke-test.mjs               # 集成 smoke（无账号可跑）
+npm test                                  # Node 侧 52 测试
+node scripts/smoke-test.mjs               # 集成 smoke 9 项（隔离数据目录，无账号可跑）
 ```
 
-CI：GitHub Actions 三 job——Python 3.11/3.12（ruff+pytest）、Node 20/22（npm ci + 全模块语法检查 + 测试 + smoke）、安全基线（敏感文件未跟踪、无 shell 串执行）。
+CI：GitHub Actions 五 job——Python 3.11/3.12（ruff+pytest）、Node 22/24（npm ci + 全模块语法检查 + 测试 + smoke，隔离数据目录）、安全基线（敏感文件未跟踪、禁止同步子进程 API、强制异步 spawn）。
 
 更多文档：[docs/architecture.md](docs/architecture.md) · [docs/agent-guide.md](docs/agent-guide.md) · [CHANGELOG.md](CHANGELOG.md)
 
