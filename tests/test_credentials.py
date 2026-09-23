@@ -79,8 +79,22 @@ def test_login_single_source_of_truth():
 
 
 def test_main_py_reads_credentials_store_first():
-    """main.py 的 cookie 来源优先级：统一凭据库 > legacy config.json 兜底。"""
+    """main.py 的 cookie 来源优先级：统一凭据库 > legacy config.json 兜底；
+    且隔离数据目录（ZHIHU_MCP_DATA_DIR）下 legacy 绝不参与。"""
     main_src = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
     assert 'os.environ.get("ZHIHU_MCP_DATA_DIR")' in main_src, "main.py 必须与 Node/login 同语义读 DATA_DIR"
-    # 兜底条件：只有凭据库无 cookie 时才读 legacy config
-    assert "if not _credentials_cookie and os.path.exists(_config_path)" in main_src
+    # 兜底三条件：非隔离 + 凭据库无 cookie + legacy 文件存在
+    assert ("if not os.environ.get(\"ZHIHU_MCP_DATA_DIR\") and not _credentials_cookie "
+            "and os.path.exists(_config_path)") in main_src, "legacy 兜底必须带隔离 guard"
+
+
+def test_login_isolation_guard():
+    """隔离 guard：设置 ZHIHU_MCP_DATA_DIR 后 login.py 绝不迁移 legacy config。"""
+    login_src = (Path(__file__).resolve().parent.parent / "login.py").read_text(encoding="utf-8")
+    # migrate_legacy_once 内第一道闸必须是隔离判断（换行+缩进+return 紧随其后）
+    guard = 'if os.environ.get("ZHIHU_MCP_DATA_DIR"):' + "\n" + " " * 8 + "return"
+    assert guard in login_src
+    # 且隔离判断位于 legacy 文件存在性判断之前（先挡语义再挡文件）
+    idx_env = login_src.index(guard)
+    idx_exists = login_src.index("if os.path.exists(CRED_STORE) or not os.path.exists(LEGACY_CONFIG_FILE):")
+    assert idx_env < idx_exists

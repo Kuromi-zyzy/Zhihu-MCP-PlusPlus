@@ -11,7 +11,12 @@ login.py -- 自动打开浏览器登录知乎，捕获 Cookie
 判定逻辑（2026-09-22 加固，回流自用户目录 qr_login.py）:
     不再以「URL 离开 /signin」判定登录——知乎登录页自身重定向会误触发，
     导致未扫码就抓到匿名 Cookie。改为轮询 Cookie 出现登录令牌 z_c0 为准，
-    且 /api/v4/me 验证通过后才写入 config.json（验证失败不落盘）。
+    且 /api/v4/me 验证通过后才写入统一凭据库（验证失败不落盘）。
+
+凭据单一来源（2026-09-23 rc5 收口）:
+    唯一写入点 = <CRED_DIR>/credentials.json（CRED_DIR 与 Node 同语义，
+    ZHIHU_MCP_DATA_DIR 优先，默认 ~/.zhihu-mcp）。legacy 爬虫 config.json
+    已停止写入；仅在默认数据目录首次使用时只读迁移一次，设置隔离目录绝不迁移。
 """
 
 import json
@@ -59,7 +64,11 @@ def migrate_legacy_once():
     """首次使用且无统一凭据库时，从 legacy 爬虫 config.json 只读迁移一次。
 
     config.json 从此只读（v1 §3 单一来源收口）：不再主动写，仅作为迁移源。
+    隔离数据目录（ZHIHU_MCP_DATA_DIR）下绝不迁移——自定义 profile 是干净起点，
+    不允许从仓库根的旧账号偷偷导入登录态。
     """
+    if os.environ.get("ZHIHU_MCP_DATA_DIR"):
+        return
     if os.path.exists(CRED_STORE) or not os.path.exists(LEGACY_CONFIG_FILE):
         return
     try:

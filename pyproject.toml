@@ -1,6 +1,6 @@
 [project]
 name = "zhihu-spider"
-version = "1.0.0-rc5"
+version = "1.0.0"
 description = "知乎内容爬虫，支持问题/回答/文章模式"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -55,9 +55,10 @@ if os.path.exists(_cred_path):
         pass
 
 # 从 config.json 加载 Cookie（legacy 只读兜底；login.py 已不再写此文件）
+# 仅默认数据目录下兜底：设置了 ZHIHU_MCP_DATA_DIR 的隔离 profile 绝不读仓库旧账号
 _config_path = os.path.join(os.path.dirname(__file__), "config.json")
 _config_cookie = ""
-if not _credentials_cookie and os.path.exists(_config_path):
+if not os.environ.get("ZHIHU_MCP_DATA_DIR") and not _credentials_cookie and os.path.exists(_config_path):
     try:
         with open(_config_path, "r", encoding="utf-8") as _f:
             _cfg = json.load(_f)

@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.0 (2026-09-23)
+
+**stable 发布**。四轮外部审查 + 第五轮验收（RC5 PASS）后的最终收口：
+
+### Fixed（stable 验收最后一处隔离边界）
+- Python 侧隔离 guard 贯彻到底：`login.py` 的 `migrate_legacy_once()` 与 `main.py` 的 legacy config 兜底，在设置 `ZHIHU_MCP_DATA_DIR` 后一律跳过——隔离 profile 是干净起点，绝不从仓库根旧账号导入登录态；Node 侧（credentials.js）此前已落实，两端语义现已完全一致
+- 测试改写：旧断言曾把"双读路径"当正常行为，现改为隔离断言（`test_login_isolation_guard` + main.py 三条件 guard 源码级断言）；行为级验证确认隔离目录零文件产生
+- pytest 54→55；版本三处对齐 `1.0.0`
+
+### 升级路径
+- 全新用户：直接 `python login.py`（写 `<数据目录>/credentials.json`）或 `zhihu_auth_import`
+- 旧用户：首次运行自动从旧 `config.json` / `~/.zhihu-mcp/config.json` 只读迁移一次，之后旧文件不再被读写
+
 ## v1.0.0-rc5 (2026-09-23)
 
 stable 前最后收口（第四轮验收：rc4 主功能 PASS，凭据单一来源为最后阻塞项）：
