@@ -24,5 +24,19 @@
   },
   "engines": {
     "node": ">=22.5.0"
+  },
+  "contributors": [
+    {
+      "name": "Milloyy",
+      "url": "https://github.com/Milloyy"
+    },
+    {
+      "name": "Foxgeek36 (Decimal)",
+      "url": "https://github.com/Foxgeek36"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kuromi-zyzy/Zhihu-MCP-PlusPlus.git"
   }
 }

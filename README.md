@@ -130,15 +130,23 @@ CI：GitHub Actions 五 job——Python 3.11/3.12（ruff+pytest）、Node 22/24�
 
 ## 致谢
 
+### 原作者
+
 本项目由两位原作者的工作结合发展而来：
 
-- **Milloyy** — ZhihuSpider 原始作者，2019 年完成最初实现。原仓库与账号现已不可访问，谨以 git 历史留此致谢。
-- **[Foxgeek36 (Decimal)](https://github.com/Foxgeek36)** — 在 Milloyy 版本基础上维护并扩展，本仓库 fork 自 `Foxgeek36/ZhihuSpider`，将两者结合后继续开发至今。
+- **[Milloyy](https://github.com/Milloyy)**（<42117644+Milloyy@users.noreply.github.com>）— ZhihuSpider 原始作者，2019 年完成最初实现并持续维护至 2020 年（本仓库 git 历史中保留其 14 个提交，含爬虫核心与 README）。其账号与原仓库现已注销（404），谨以 git 历史留此存档。
+- **[Foxgeek36 (Decimal)](https://github.com/Foxgeek36)**（[鲜衣怒马仍少年](https://github.com/Foxgeek36)）— 本仓库 fork 的直接来源 `Foxgeek36/ZhihuSpider`（79 stars）的创建者与维护者：收留并保留了 Milloyy 的全部工作，使其在 Milloyy 退场后仍可被找到与复用，本项目正是在这份遗产上结合两作继续发展至今。
 
-另外感谢：
+### 设计参照
 
-- [zly2006/zhihu-plus-plus](https://github.com/zly2006/zhihu-plus-plus) — `zse_signer.py` 的 zse96 v2 签名算法移植来源
-- [meurz/zhihu-mcp-server](https://github.com/meurz/zhihu-mcp-server)（原名 `iteng007/zhihu-mcp-server`）— MCP 服务器的最初上游
+- **[zly2006](https://github.com/zly2006)**（[zhihu-plus-plus](https://github.com/zly2006/zhihu-plus-plus)，4.1k stars）及社区贡献者 [123Duo3](https://github.com/123Duo3)、[chenx-dust](https://github.com/chenx-dust) 等 — `zse_signer.py` 的 zse96 v2 签名算法移植来源
+- **[meurz](https://github.com/meurz)**（[zhihu-mcp-server](https://github.com/meurz/zhihu-mcp-server)，原名 iteng007/zhihu-mcp-server，原作者 iteng007 账号已注销）— MCP 服务器的最初上游
+
+### 贡献者
+
+- **[Kuromi-zyzy](https://github.com/Kuromi-zyzy)** — 当前维护者：MCP 服务器架构（27 工具）、双 transport、Search Router、本地知识库（SQLite FTS5 trigram）、凭据体系与 CI
+
+欢迎 PR；贡献前请先阅读 [docs/architecture.md](docs/architecture.md) 了解分层约定。
 
 ## License
 
